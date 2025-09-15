@@ -93,7 +93,13 @@ def setup_google_credentials():
 # Setup Google credentials
 google_creds_ok = setup_google_credentials()
 
-os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY", "YOUR_GOOGLE_API_KEY")
+# Set Google API key only if it's provided
+google_api_key = os.getenv("GOOGLE_API_KEY")
+if google_api_key and google_api_key != "YOUR_GOOGLE_API_KEY":
+    os.environ["GOOGLE_API_KEY"] = google_api_key
+    print(f"✅ Google API key set: {google_api_key[:10]}...")
+else:
+    print("⚠️ Google API key not set - this might cause issues with some Google services")
 
 # Salesforce OAuth2 Connected App credentials
 SALESFORCE_DOMAIN = os.environ.get('SALESFORCE_ORG_DOMAIN', 'YOUR_SALESFORCE_ORG_DOMAIN')
@@ -132,18 +138,48 @@ def initialize_livekit_components():
         print(f"Before LiveKit init - GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
         print(f"Before LiveKit init - File exists: {os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', ''))}")
         
+        # Try to read the credentials file to verify it's valid JSON
+        try:
+            with open(creds_path, 'r') as f:
+                creds_content = f.read()
+                print(f"Credentials file size: {len(creds_content)} characters")
+                # Try to parse as JSON to verify it's valid
+                json.loads(creds_content)
+                print("✅ Credentials file is valid JSON")
+        except Exception as e:
+            print(f"❌ Error reading credentials file: {e}")
+            return False
+        
         # Initialize Google STT (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
-        stt_engine = google.STT(
-            model="latest_long",
-            spoken_punctuation=True,
-            languages="en-US",
-        )
+        try:
+            print("🔧 Initializing Google STT...")
+            stt_engine = google.STT(
+                model="latest_long",
+                spoken_punctuation=True,
+                languages="en-US",
+            )
+            print("✅ Google STT initialized successfully")
+        except Exception as e:
+            print(f"❌ Failed to initialize Google STT: {e}")
+            raise e
         
         # Initialize Google TTS (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
-        tts_engine = google.TTS()
+        try:
+            print("🔧 Initializing Google TTS...")
+            tts_engine = google.TTS()
+            print("✅ Google TTS initialized successfully")
+        except Exception as e:
+            print(f"❌ Failed to initialize Google TTS: {e}")
+            raise e
         
         # Initialize Google VAD (Voice Activity Detection)
-        vad_engine = google.VAD()
+        try:
+            print("🔧 Initializing Google VAD...")
+            vad_engine = google.VAD()
+            print("✅ Google VAD initialized successfully")
+        except Exception as e:
+            print(f"❌ Failed to initialize Google VAD: {e}")
+            raise e
         
         # Initialize Salesforce LLM
         llm_engine = SalesforceLLM()
