@@ -14,6 +14,10 @@ import logging
 import time
 from flask_cors import CORS
 
+# Initialize logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Handle Google credentials for cloud deployment BEFORE LiveKit imports
 def setup_google_credentials():
     """Setup Google credentials for both local and cloud deployment"""
@@ -109,7 +113,6 @@ CORS(app)
 # Enable LiveKit debug logs
 os.environ["LIVEKIT_LOG_LEVEL"] = "debug"
 logging.getLogger("livekit").setLevel(logging.DEBUG)
-logger = logging.getLogger(__name__)
 
 # Salesforce configuration
 SALESFORCE_DOMAIN = os.getenv("SALESFORCE_ORG_DOMAIN", "https://de1740385138027.my.salesforce.com")
