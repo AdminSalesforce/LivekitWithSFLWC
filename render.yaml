@@ -1,25 +1,27 @@
 services:
   - type: web
     name: salesforce-voice-agent
-    env: python
+    runtime: python
+    region: oregon
+    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: python app.py
     envVars:
       - key: LIVEKIT_API_KEY
-        value: YOUR_LIVEKIT_API_KEY
+        sync: false
       - key: LIVEKIT_API_SECRET
-        value: YOUR_LIVEKIT_API_SECRET
+        sync: false
       - key: LIVEKIT_URL
-        value: YOUR_LIVEKIT_URL
+        sync: false
       - key: GOOGLE_API_KEY
-        value: YOUR_GOOGLE_API_KEY
+        sync: false
       - key: SALESFORCE_ORG_DOMAIN
-        value: YOUR_SALESFORCE_ORG_DOMAIN
+        sync: false
       - key: SALESFORCE_CLIENT_ID
-        value: YOUR_SALESFORCE_CLIENT_ID
+        sync: false
       - key: SALESFORCE_CLIENT_SECRET
-        value: YOUR_SALESFORCE_CLIENT_SECRET
+        sync: false
       - key: SALESFORCE_AGENT_ID
-        value: YOUR_SALESFORCE_AGENT_ID
+        sync: false
       - key: GOOGLE_APPLICATION_CREDENTIALS
-        value: "google-credentials.json"
+        sync: false
