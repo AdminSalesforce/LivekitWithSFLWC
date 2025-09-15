@@ -486,6 +486,142 @@ def debug_salesforce():
         }
     })
 
+@app.route('/api/test/salesforce-auth')
+def test_salesforce_auth():
+    """Test endpoint to verify Salesforce authentication"""
+    try:
+        print("🔧 Testing Salesforce authentication...")
+        
+        # Test getting access token
+        access_token = asyncio.run(get_salesforce_access_token())
+        
+        if access_token:
+            return jsonify({
+                "success": True,
+                "message": "Salesforce authentication successful",
+                "access_token_preview": access_token[:20] + "...",
+                "token_length": len(access_token)
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Failed to get Salesforce access token",
+                "error": "Authentication failed"
+            })
+    except Exception as e:
+        print(f"❌ Error testing Salesforce auth: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "message": "Error testing Salesforce authentication",
+            "error": str(e)
+        })
+
+@app.route('/api/test/einstein-agent', methods=['POST'])
+def test_einstein_agent():
+    """Test endpoint to verify Einstein Agent API call"""
+    try:
+        data = request.get_json()
+        agent_id = data.get('agent_id', '0XxKj000001HwOrKAK')  # Default agent ID
+        test_message = data.get('message', 'Hello, this is a test message')
+        session_id = data.get('session_id', 'test_session_' + str(int(time.time())))
+        
+        print(f"🔧 Testing Einstein Agent with:")
+        print(f"  - Agent ID: {agent_id}")
+        print(f"  - Message: {test_message}")
+        print(f"  - Session ID: {session_id}")
+        
+        # Call Einstein Agent
+        result = asyncio.run(call_einstein_agent(test_message, session_id, agent_id))
+        
+        return jsonify({
+            "success": True,
+            "message": "Einstein Agent test completed",
+            "agent_id": agent_id,
+            "session_id": session_id,
+            "test_message": test_message,
+            "agent_response": result,
+            "response_type": type(result).__name__
+        })
+        
+    except Exception as e:
+        print(f"❌ Error testing Einstein Agent: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "message": "Error testing Einstein Agent",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+
+@app.route('/api/test/complete-flow', methods=['POST'])
+def test_complete_flow():
+    """Test the complete flow: Einstein Agent + TTS"""
+    try:
+        data = request.get_json()
+        agent_id = data.get('agent_id', '0XxKj000001HwOrKAK')
+        test_message = data.get('message', 'Hello, this is a complete flow test')
+        session_id = data.get('session_id', 'complete_test_' + str(int(time.time())))
+        
+        print(f"🔧 Testing complete flow:")
+        print(f"  - Agent ID: {agent_id}")
+        print(f"  - Message: {test_message}")
+        print(f"  - Session ID: {session_id}")
+        
+        # Step 1: Call Einstein Agent
+        print("🔧 Step 1: Calling Einstein Agent...")
+        agent_response = asyncio.run(call_einstein_agent(test_message, session_id, agent_id))
+        print(f"✅ Einstein Agent response: {agent_response}")
+        
+        # Step 2: Initialize LiveKit components if needed
+        print("🔧 Step 2: Initializing LiveKit components...")
+        if not tts_engine:
+            init_result = initialize_livekit_components()
+            if not init_result:
+                return jsonify({
+                    "success": False,
+                    "message": "Failed to initialize LiveKit components",
+                    "step": "livekit_init"
+                })
+        
+        # Step 3: Generate TTS
+        print("🔧 Step 3: Generating TTS...")
+        tts_audio = asyncio.run(process_text_with_tts(agent_response))
+        
+        if tts_audio:
+            print(f"✅ TTS generated: {len(tts_audio)} characters")
+            return jsonify({
+                "success": True,
+                "message": "Complete flow test successful",
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "test_message": test_message,
+                "agent_response": agent_response,
+                "tts_generated": True,
+                "tts_audio_length": len(tts_audio),
+                "tts_audio_preview": tts_audio[:100] + "..." if len(tts_audio) > 100 else tts_audio
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "TTS generation failed",
+                "step": "tts_generation",
+                "agent_response": agent_response
+            })
+            
+    except Exception as e:
+        print(f"❌ Error in complete flow test: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "message": "Error in complete flow test",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+
 @app.route('/api/debug/init-livekit')
 def debug_init_livekit():
     """Debug endpoint to manually initialize LiveKit components"""
