@@ -997,11 +997,19 @@ async def process_text_with_tts(text, language='en-US', voice='en-US-Wavenet-A')
             else:
                 print(f"🔧 No audio data in chunk: {chunk}")
         
+        if not audio_chunks:
+            print("❌ No audio chunks received")
+            return None
+            
         full_audio_bytes = b"".join(audio_chunks)
         print(f"✅ TTS synthesis complete: {len(full_audio_bytes)} total bytes")
         
+        # Convert raw audio to WAV format
+        wav_audio = create_wav_file(full_audio_bytes)
+        print(f"✅ WAV audio created: {len(wav_audio)} bytes")
+        
         # Encode to base64 for transmission
-        audio_base64 = base64.b64encode(full_audio_bytes).decode('utf-8')
+        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
         print(f"✅ Audio encoded to base64: {len(audio_base64)} characters")
         
         return audio_base64
@@ -1012,6 +1020,35 @@ async def process_text_with_tts(text, language='en-US', voice='en-US-Wavenet-A')
         import traceback
         traceback.print_exc()
         return None
+
+def create_wav_file(audio_data, sample_rate=24000, channels=1, bits_per_sample=16):
+    """Create a WAV file from raw audio data"""
+    try:
+        import struct
+        
+        # WAV file header
+        wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
+            b'RIFF',                    # ChunkID
+            36 + len(audio_data),       # ChunkSize
+            b'WAVE',                    # Format
+            b'fmt ',                    # Subchunk1ID
+            16,                         # Subchunk1Size
+            1,                          # AudioFormat (PCM)
+            channels,                   # NumChannels
+            sample_rate,                # SampleRate
+            sample_rate * channels * bits_per_sample // 8,  # ByteRate
+            channels * bits_per_sample // 8,  # BlockAlign
+            bits_per_sample,            # BitsPerSample
+            b'data',                    # Subchunk2ID
+            len(audio_data)             # Subchunk2Size
+        )
+        
+        return wav_header + audio_data
+        
+    except Exception as e:
+        print(f"❌ Error creating WAV file: {e}")
+        # Return raw audio data if WAV creation fails
+        return audio_data
 
 @app.route('/api/voice/stt', methods=['POST'])
 def speech_to_text():
