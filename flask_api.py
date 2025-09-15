@@ -150,18 +150,38 @@ os.environ["LIVEKIT_LOG_LEVEL"] = "debug"
 logging.getLogger("livekit").setLevel(logging.DEBUG)
 
 # Salesforce configuration
+print("🔧 Loading Salesforce configuration...")
 SALESFORCE_DOMAIN = os.getenv("SALESFORCE_ORG_DOMAIN", "https://de1740385138027.my.salesforce.com")
 SALESFORCE_CLIENT_ID = os.getenv("SALESFORCE_CLIENT_ID")
 SALESFORCE_CLIENT_SECRET = os.getenv("SALESFORCE_CLIENT_SECRET")
+
+print(f"🔧 Salesforce Configuration Status:")
+print(f"  - Domain: {SALESFORCE_DOMAIN}")
+print(f"  - Client ID: {'SET' if SALESFORCE_CLIENT_ID else 'NOT SET'}")
+print(f"  - Client Secret: {'SET' if SALESFORCE_CLIENT_SECRET else 'NOT SET'}")
+
+if SALESFORCE_CLIENT_ID:
+    print(f"  - Client ID Value: {SALESFORCE_CLIENT_ID[:20]}...")
+else:
+    print("  - Client ID Value: None")
+
+if SALESFORCE_CLIENT_SECRET:
+    print(f"  - Client Secret Value: {SALESFORCE_CLIENT_SECRET[:20]}...")
+else:
+    print("  - Client Secret Value: None")
 
 # Validate Salesforce configuration
 if not SALESFORCE_CLIENT_ID or SALESFORCE_CLIENT_ID == "YOUR_SALESFORCE_CLIENT_ID":
     print("❌ SALESFORCE_CLIENT_ID environment variable not set")
     logger.error("SALESFORCE_CLIENT_ID environment variable not set")
+else:
+    print("✅ SALESFORCE_CLIENT_ID is properly set")
 
 if not SALESFORCE_CLIENT_SECRET or SALESFORCE_CLIENT_SECRET == "YOUR_SALESFORCE_CLIENT_SECRET":
     print("❌ SALESFORCE_CLIENT_SECRET environment variable not set")
     logger.error("SALESFORCE_CLIENT_SECRET environment variable not set")
+else:
+    print("✅ SALESFORCE_CLIENT_SECRET is properly set")
 
 # LiveKit components (will be initialized when needed)
 stt_engine = None
@@ -448,6 +468,22 @@ def debug_credentials():
         "local_file_exists": os.path.exists("google-credentials.json"),
         "json_env_var_exists": "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ,
         "setup_result": google_creds_ok
+    })
+
+@app.route('/api/debug/salesforce')
+def debug_salesforce():
+    """Debug endpoint to check Salesforce credentials setup"""
+    return jsonify({
+        "salesforce_domain": SALESFORCE_DOMAIN,
+        "client_id_set": bool(SALESFORCE_CLIENT_ID),
+        "client_secret_set": bool(SALESFORCE_CLIENT_SECRET),
+        "client_id_value": SALESFORCE_CLIENT_ID[:20] + "..." if SALESFORCE_CLIENT_ID else None,
+        "client_secret_value": SALESFORCE_CLIENT_SECRET[:20] + "..." if SALESFORCE_CLIENT_SECRET else None,
+        "environment_variables": {
+            "SALESFORCE_ORG_DOMAIN": os.getenv("SALESFORCE_ORG_DOMAIN"),
+            "SALESFORCE_CLIENT_ID": "SET" if os.getenv("SALESFORCE_CLIENT_ID") else "NOT SET",
+            "SALESFORCE_CLIENT_SECRET": "SET" if os.getenv("SALESFORCE_CLIENT_SECRET") else "NOT SET"
+        }
     })
 
 @app.route('/api/debug/init-livekit')
