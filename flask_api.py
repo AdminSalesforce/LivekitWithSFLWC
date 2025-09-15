@@ -12,6 +12,7 @@ import uuid
 import tempfile
 import logging
 import time
+import base64
 from flask_cors import CORS
 
 # Initialize logging first
@@ -477,23 +478,44 @@ def chat():
 def einstein_agent():
     """Einstein Agent endpoint"""
     try:
+        print("=== EINSTEIN AGENT API CALLED ===")
         data = request.get_json()
+        print("Request data:", json.dumps(data, indent=2))
+        
         message = data.get('message', '')
         agent_id = data.get('agent_id')
         session_id = data.get('session_id', str(uuid.uuid4()))
         
+        print(f"Message: {message}")
+        print(f"Session ID: {session_id}")
+        print(f"Agent ID: {agent_id}")
+        
         if not agent_id:
+            print("❌ Error: Agent ID is required")
             return jsonify({"error": "Agent ID is required"}), 400
+        
+        print(f"✅ Calling Einstein Agent with ID: {agent_id}")
         
         # Call Einstein Agent
         result = asyncio.run(call_einstein_agent(message, session_id, agent_id))
         
-        return jsonify({
+        print(f"✅ Einstein Agent response: {result}")
+        
+        response_data = {
             "response": result,
+            "message": result,  # Add message field for LWC compatibility
             "session_id": session_id,
             "agent_id": agent_id
-        })
+        }
+        
+        print("Response data:", json.dumps(response_data, indent=2))
+        
+        return jsonify(response_data)
+        
     except Exception as e:
+        print(f"❌ Error in Einstein Agent API: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/voice/process', methods=['POST'])
@@ -535,6 +557,45 @@ def process_voice():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+async def process_text_with_tts(text, language='en-US', voice='en-US-Wavenet-A'):
+    """Converts text to base64 audio data using Google TTS via LiveKit"""
+    try:
+        print(f"🔧 Processing TTS for text: {text[:50]}...")
+        print(f"Language: {language}, Voice: {voice}")
+        
+        if not tts_engine:
+            print("❌ TTS engine not available")
+            return None
+        
+        # Use LiveKit TTS with specific voice settings
+        audio_stream = tts_engine.synthesize(
+            text=text,
+            voice=voice,
+            language=language
+        )
+        
+        print("🔧 TTS synthesis started...")
+        audio_chunks = []
+        async for chunk in audio_stream:
+            audio_chunks.append(chunk.data)
+            print(f"🔧 Received audio chunk: {len(chunk.data)} bytes")
+        
+        full_audio_bytes = b"".join(audio_chunks)
+        print(f"✅ TTS synthesis complete: {len(full_audio_bytes)} total bytes")
+        
+        # Encode to base64 for transmission
+        audio_base64 = base64.b64encode(full_audio_bytes).decode('utf-8')
+        print(f"✅ Audio encoded to base64: {len(audio_base64)} characters")
+        
+        return audio_base64
+        
+    except Exception as e:
+        print(f"❌ Error in process_text_with_tts: {e}")
+        logger.error(f"Error in process_text_with_tts: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 @app.route('/api/voice/stt', methods=['POST'])
 def speech_to_text():
     """Speech-to-Text endpoint"""
@@ -562,23 +623,53 @@ def speech_to_text():
 def text_to_speech():
     """Text-to-Speech endpoint"""
     try:
+        print("=== TTS API CALLED ===")
         data = request.get_json()
+        print("TTS request data:", json.dumps(data, indent=2))
+        
         text = data.get('text', '')
+        language = data.get('language', 'en-US')
+        voice = data.get('voice', 'en-US-Wavenet-A')
+        
+        print(f"Text: {text}")
+        print(f"Language: {language}")
+        print(f"Voice: {voice}")
+        
+        if not text:
+            print("❌ Error: Text is required")
+            return jsonify({"error": "Text is required"}), 400
         
         # Initialize LiveKit components if not already done
         if not tts_engine:
+            print("🔧 Initializing LiveKit components for TTS...")
             result = initialize_livekit_components()
             if not result:
+                print("❌ Failed to initialize LiveKit components")
                 return jsonify({"error": "Failed to initialize LiveKit components"}), 500
         
-        # Process text with TTS
-        # Note: This is a simplified example - actual implementation would generate audio
-        audio_data = "Audio generated from text"  # Placeholder for actual TTS processing
+        print("✅ TTS engine available, processing...")
         
-        return jsonify({
-            "audio_data": audio_data
-        })
+        # Process text with TTS
+        audio_content = asyncio.run(process_text_with_tts(text, language, voice))
+        
+        print(f"✅ TTS generated, audio length: {len(audio_content) if audio_content else 'null'}")
+        
+        response_data = {
+            "audio_content": audio_content,
+            "audio_data": audio_content,  # For backward compatibility
+            "text": text,
+            "language": language,
+            "voice": voice
+        }
+        
+        print("TTS response data:", json.dumps({**response_data, "audio_content": f"[{len(audio_content) if audio_content else 0} bytes]"}, indent=2))
+        
+        return jsonify(response_data)
+        
     except Exception as e:
+        print(f"❌ Error in TTS: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
