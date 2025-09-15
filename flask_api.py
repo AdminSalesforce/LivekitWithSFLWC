@@ -34,18 +34,37 @@ os.environ["LIVEKIT_API_SECRET"] = os.getenv("LIVEKIT_API_SECRET", "YOUR_LIVEKIT
 os.environ["LIVEKIT_URL"] = os.getenv("LIVEKIT_URL", "YOUR_LIVEKIT_URL")
 
 # Handle Google credentials for cloud deployment
-if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
-    # Use JSON string from environment variable (for cloud deployment)
-    creds_json = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
-    creds_data = json.loads(creds_json)
-    
-    # Create temporary file for Google credentials
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        json.dump(creds_data, f)
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = f.name
-else:
-    # Use credentials file (for both local and cloud deployment)
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google-credentials.json")
+def setup_google_credentials():
+    """Setup Google credentials for both local and cloud deployment"""
+    try:
+        if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
+            # Use JSON string from environment variable (for cloud deployment)
+            creds_json = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+            creds_data = json.loads(creds_json)
+            
+            # Create temporary file for Google credentials
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                json.dump(creds_data, f)
+                creds_path = f.name
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+                logger.info(f"Google credentials set from JSON string: {creds_path}")
+                return True
+        else:
+            # Use credentials file (for local deployment)
+            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google-credentials.json")
+            if os.path.exists(creds_path):
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+                logger.info(f"Google credentials set from file: {creds_path}")
+                return True
+            else:
+                logger.warning(f"Google credentials file not found: {creds_path}")
+                return False
+    except Exception as e:
+        logger.error(f"Failed to setup Google credentials: {e}")
+        return False
+
+# Setup Google credentials
+google_creds_ok = setup_google_credentials()
 
 os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY", "YOUR_GOOGLE_API_KEY")
 
@@ -53,7 +72,7 @@ os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY", "YOUR_GOOGLE_API_KEY"
 SALESFORCE_DOMAIN = os.environ.get('SALESFORCE_ORG_DOMAIN', 'YOUR_SALESFORCE_ORG_DOMAIN')
 SALESFORCE_CLIENT_ID = os.environ.get('SALESFORCE_CLIENT_ID', 'YOUR_SALESFORCE_CLIENT_ID')
 SALESFORCE_CLIENT_SECRET = os.environ.get('SALESFORCE_CLIENT_SECRET', 'YOUR_SALESFORCE_CLIENT_SECRET')
-SALESFORCE_AGENT_ID = os.environ.get('SALESFORCE_AGENT_ID', 'YOUR_SALESFORCE_AGENT_ID')
+SALESFORCE_AGENT_ID = os.environ.get('SALESFORCE_AGENT_ID', None)  # No default - must be provided dynamically
 
 # Global access token
 access_token = None
@@ -349,13 +368,20 @@ async def get_salesforce_access_token():
                 print(f"Failed to get access token: {response.status} - {error_text}")
                 raise Exception(f"Failed to get Salesforce access token: {response.status}")
 
-async def call_einstein_agent(message, session_id):
-    """Call Salesforce Einstein Agent API"""
+async def call_einstein_agent(message, session_id, agent_id=None):
+    """Call Salesforce Einstein Agent API with dynamic agent ID"""
     try:
+        # Agent ID is required - must be provided dynamically
+        if not agent_id:
+            if SALESFORCE_AGENT_ID:
+                agent_id = SALESFORCE_AGENT_ID
+            else:
+                return "Error: Agent ID is required but not provided"
+        
         token = await get_salesforce_access_token()
         
-        # Call Salesforce Einstein Agent
-        agent_url = f"{SALESFORCE_DOMAIN}/services/data/v58.0/einstein/agent/{SALESFORCE_AGENT_ID}/chat"
+        # Call Salesforce Einstein Agent with dynamic agent ID
+        agent_url = f"{SALESFORCE_DOMAIN}/services/data/v58.0/einstein/agent/{agent_id}/chat"
         
         headers = {
             "Authorization": f"Bearer {token}",
@@ -390,13 +416,22 @@ def health_check():
     return jsonify({
         "status": "running",
         "message": "Salesforce Voice Agent API with Einstein Agent and LiveKit is running",
+        "google_credentials": google_creds_ok,
         "salesforce_domain": SALESFORCE_DOMAIN,
-        "agent_id": SALESFORCE_AGENT_ID,
+        "agent_id": "dynamic (provided in requests)",
         "livekit_url": os.environ.get("LIVEKIT_URL"),
         "livekit_components": {
             "stt": stt_engine is not None,
             "tts": tts_engine is not None,
             "vad": vad_engine is not None
+        },
+        "endpoints": {
+            "health": "/",
+            "chat": "/api/chat",
+            "einstein_agent": "/api/einstein/agent",
+            "voice_process": "/api/voice/process",
+            "voice_stt": "/api/voice/stt",
+            "voice_tts": "/api/voice/tts"
         }
     })
 
@@ -432,26 +467,61 @@ def handle_voice_query():
 
 @app.route('/api/chat', methods=['POST'])
 def chat_with_agent():
-    """Chat with Einstein Agent"""
+    """Chat with Einstein Agent with dynamic agent ID"""
     data = request.json
     message = data.get('message')
     session_id = data.get('session_id', str(uuid.uuid4()))
+    agent_id = data.get('agent_id')  # Agent ID is required
 
     if not message:
         return jsonify({'error': 'No message provided'}), 400
+    
+    if not agent_id:
+        return jsonify({'error': 'Agent ID is required'}), 400
 
     try:
-        # Call Einstein Agent asynchronously
+        # Call Einstein Agent asynchronously with dynamic agent ID
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        response_text = loop.run_until_complete(call_einstein_agent(message, session_id))
+        response_text = loop.run_until_complete(call_einstein_agent(message, session_id, agent_id))
         loop.close()
 
         return jsonify({
             'response': response_text,
-            'session_id': session_id
+            'session_id': session_id,
+            'agent_id': agent_id
         }), 200
 
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/einstein/agent', methods=['POST'])
+def einstein_agent_endpoint():
+    """Dedicated Einstein Agent API endpoint with dynamic agent ID"""
+    try:
+        data = request.get_json()
+        if not data or 'message' not in data:
+            return jsonify({'error': 'Message is required'}), 400
+        
+        message = data['message']
+        session_id = data.get('session_id', str(uuid.uuid4()))
+        agent_id = data.get('agent_id')  # Agent ID is required
+        
+        if not agent_id:
+            return jsonify({'error': 'Agent ID is required'}), 400
+        
+        # Call Einstein Agent with dynamic agent ID
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        response = loop.run_until_complete(call_einstein_agent(message, session_id, agent_id))
+        loop.close()
+        
+        return jsonify({
+            'response': response,
+            'session_id': session_id,
+            'agent_id': agent_id
+        }), 200
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -462,9 +532,13 @@ def process_voice():
         # Get audio data from request
         audio_file = request.files.get('audio')
         session_id = request.form.get('session_id', str(uuid.uuid4()))
+        agent_id = request.form.get('agent_id')  # Agent ID is required
         
         if not audio_file:
             return jsonify({'error': 'No audio file provided'}), 400
+        
+        if not agent_id:
+            return jsonify({'error': 'Agent ID is required'}), 400
 
         # Process audio with STT
         loop = asyncio.new_event_loop()
@@ -479,8 +553,8 @@ def process_voice():
         if not transcript:
             return jsonify({'error': 'Failed to process audio'}), 500
         
-        # Get response from Einstein Agent
-        response_text = loop.run_until_complete(call_einstein_agent(transcript, session_id))
+        # Get response from Einstein Agent with dynamic agent ID
+        response_text = loop.run_until_complete(call_einstein_agent(transcript, session_id, agent_id))
         
         # Convert response to speech
         response_audio = loop.run_until_complete(process_text_with_tts(response_text))
@@ -491,6 +565,7 @@ def process_voice():
             'transcript': transcript,
             'response': response_text,
             'session_id': session_id,
+            'agent_id': agent_id,
             'audio_available': response_audio is not None
         }), 200
 

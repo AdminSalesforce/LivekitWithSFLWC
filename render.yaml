@@ -21,7 +21,7 @@ services:
         sync: false
       - key: SALESFORCE_CLIENT_SECRET
         sync: false
-      - key: SALESFORCE_AGENT_ID
-        sync: false
       - key: GOOGLE_APPLICATION_CREDENTIALS
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
