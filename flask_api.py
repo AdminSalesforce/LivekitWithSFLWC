@@ -988,8 +988,12 @@ async def process_text_with_tts(text, language='en-US', voice='en-US-Wavenet-A')
         print("🔧 TTS synthesis started...")
         audio_chunks = []
         async for chunk in audio_stream:
-            audio_chunks.append(chunk.data)
-            print(f"🔧 Received audio chunk: {len(chunk.data)} bytes")
+            # Use chunk.audio instead of chunk.data based on working code
+            if hasattr(chunk, 'audio') and chunk.audio:
+                audio_chunks.append(chunk.audio)
+                print(f"🔧 Received audio chunk: {len(chunk.audio)} bytes")
+            else:
+                print(f"🔧 No audio data in chunk: {chunk}")
         
         full_audio_bytes = b"".join(audio_chunks)
         print(f"✅ TTS synthesis complete: {len(full_audio_bytes)} total bytes")
