@@ -48,6 +48,7 @@ def setup_google_credentials():
                         
                     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds_path
                     print(f"✅ Fixed private key format and set credentials: {temp_creds_path}")
+                    print(f"✅ Environment variable set to: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
                     logger.info(f"✅ Google credentials set from Render secret file with fixed private key: {temp_creds_path}")
                     return True
             except Exception as e:
@@ -125,6 +126,10 @@ if google_creds_ok:
 os.environ["LIVEKIT_API_KEY"] = os.getenv("LIVEKIT_API_KEY", "YOUR_LIVEKIT_API_KEY")
 os.environ["LIVEKIT_API_SECRET"] = os.getenv("LIVEKIT_API_SECRET", "YOUR_LIVEKIT_API_SECRET")
 os.environ["LIVEKIT_URL"] = os.getenv("LIVEKIT_URL", "YOUR_LIVEKIT_URL")
+
+# Verify credentials are properly set before LiveKit imports
+print(f"🔧 Final GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
+print(f"🔧 File exists: {os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', ''))}")
 
 # LiveKit imports - must be at module level for plugin registration
 from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm, Agent, ConversationItemAddedEvent, UserInputTranscribedEvent
