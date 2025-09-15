@@ -14,26 +14,7 @@ import logging
 import time
 from flask_cors import CORS
 
-# LiveKit imports - moved to function level to prevent import-time initialization errors
-# from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm, Agent, ConversationItemAddedEvent, UserInputTranscribedEvent
-# from livekit.agents.voice import AgentSession
-# from livekit.plugins import google
-# from livekit import rtc
-
-app = Flask(__name__)
-CORS(app)
-
-# Enable LiveKit debug logs
-os.environ["LIVEKIT_LOG_LEVEL"] = "debug"
-logging.getLogger("livekit").setLevel(logging.DEBUG)
-logger = logging.getLogger(__name__)
-
-# Set LiveKit environment variables
-os.environ["LIVEKIT_API_KEY"] = os.getenv("LIVEKIT_API_KEY", "YOUR_LIVEKIT_API_KEY")
-os.environ["LIVEKIT_API_SECRET"] = os.getenv("LIVEKIT_API_SECRET", "YOUR_LIVEKIT_API_SECRET")
-os.environ["LIVEKIT_URL"] = os.getenv("LIVEKIT_URL", "YOUR_LIVEKIT_URL")
-
-# Handle Google credentials for cloud deployment
+# Handle Google credentials for cloud deployment BEFORE LiveKit imports
 def setup_google_credentials():
     """Setup Google credentials for both local and cloud deployment"""
     print("🔧 Starting Google credentials setup...")
@@ -98,7 +79,7 @@ def setup_google_credentials():
         traceback.print_exc()
         return False
 
-# Initialize Google credentials
+# Initialize Google credentials BEFORE LiveKit imports
 print("🔧 Setting up Google credentials...")
 google_creds_ok = setup_google_credentials()
 print(f"🔧 Google credentials setup result: {google_creds_ok}")
@@ -110,6 +91,25 @@ if google_creds_ok:
         print(f"✅ Google API key set: {os.environ['GOOGLE_API_KEY'][:10]}...")
     except Exception as e:
         print(f"❌ Failed to set Google API key: {e}")
+
+# Set LiveKit environment variables
+os.environ["LIVEKIT_API_KEY"] = os.getenv("LIVEKIT_API_KEY", "YOUR_LIVEKIT_API_KEY")
+os.environ["LIVEKIT_API_SECRET"] = os.getenv("LIVEKIT_API_SECRET", "YOUR_LIVEKIT_API_SECRET")
+os.environ["LIVEKIT_URL"] = os.getenv("LIVEKIT_URL", "YOUR_LIVEKIT_URL")
+
+# LiveKit imports - must be at module level for plugin registration
+from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm, Agent, ConversationItemAddedEvent, UserInputTranscribedEvent
+from livekit.agents.voice import AgentSession
+from livekit.plugins import google
+from livekit import rtc
+
+app = Flask(__name__)
+CORS(app)
+
+# Enable LiveKit debug logs
+os.environ["LIVEKIT_LOG_LEVEL"] = "debug"
+logging.getLogger("livekit").setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Salesforce configuration
 SALESFORCE_DOMAIN = os.getenv("SALESFORCE_ORG_DOMAIN", "https://de1740385138027.my.salesforce.com")
@@ -131,14 +131,6 @@ def initialize_livekit_components():
     print("🚀 Starting LiveKit components initialization...")
     
     try:
-        # Import LiveKit modules here to prevent import-time initialization errors
-        print("🔧 Importing LiveKit modules...")
-        from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm, Agent, ConversationItemAddedEvent, UserInputTranscribedEvent
-        from livekit.agents.voice import AgentSession
-        from livekit.plugins import google
-        from livekit import rtc
-        print("✅ LiveKit modules imported successfully")
-        
         # Check if Google credentials are properly set
         if not google_creds_ok:
             print("❌ Google credentials not available, skipping LiveKit initialization")
