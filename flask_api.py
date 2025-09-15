@@ -37,7 +37,20 @@ os.environ["LIVEKIT_URL"] = os.getenv("LIVEKIT_URL", "YOUR_LIVEKIT_URL")
 def setup_google_credentials():
     """Setup Google credentials for both local and cloud deployment"""
     try:
-        # Method 1: Try JSON string from environment variable (for cloud deployment)
+        # Method 1: Try Render secret file (for cloud deployment)
+        secret_file_path = "/etc/secrets/google-credentials.json"
+        if os.path.exists(secret_file_path):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_file_path
+            logger.info(f"✅ Google credentials set from Render secret file: {secret_file_path}")
+            return True
+        
+        # Method 2: Try local google-credentials.json file
+        if os.path.exists("google-credentials.json"):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "google-credentials.json"
+            logger.info("✅ Google credentials set from local file: google-credentials.json")
+            return True
+        
+        # Method 3: Try JSON string from environment variable (fallback)
         if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
             creds_json = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
             logger.info("Found GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable")
@@ -55,23 +68,17 @@ def setup_google_credentials():
                 logger.error(f"❌ Invalid JSON in GOOGLE_APPLICATION_CREDENTIALS_JSON: {e}")
                 return False
         
-        # Method 2: Try direct file path (for local deployment)
+        # Method 4: Try direct file path (for local deployment)
         creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google-credentials.json")
         if os.path.exists(creds_path):
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
             logger.info(f"✅ Google credentials set from file: {creds_path}")
             return True
         
-        # Method 3: Try to use the uploaded google-credentials.json file
-        if os.path.exists("google-credentials.json"):
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "google-credentials.json"
-            logger.info("✅ Google credentials set from uploaded file: google-credentials.json")
-            return True
-        
         # No credentials found
         logger.error("❌ No Google credentials found!")
-        logger.error("Please set GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable in Render")
-        logger.error("Or upload google-credentials.json file to the project")
+        logger.error("Please add google-credentials.json as a secret file in Render")
+        logger.error("Or set GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable")
         return False
         
     except Exception as e:
@@ -445,6 +452,8 @@ def health_check():
         "google_credentials": {
             "available": google_creds_ok,
             "path": os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "Not set"),
+            "secret_file_exists": os.path.exists("/etc/secrets/google-credentials.json"),
+            "local_file_exists": os.path.exists("google-credentials.json"),
             "json_env_var": "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ
         },
         "salesforce_domain": SALESFORCE_DOMAIN,
@@ -507,8 +516,9 @@ def test_livekit():
         creds_status = {
             'google_creds_ok': google_creds_ok,
             'creds_path': os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "Not set"),
-            'json_env_var': "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ,
-            'file_exists': os.path.exists("google-credentials.json")
+            'secret_file_exists': os.path.exists("/etc/secrets/google-credentials.json"),
+            'local_file_exists': os.path.exists("google-credentials.json"),
+            'json_env_var': "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ
         }
         
         # Try to initialize LiveKit components
