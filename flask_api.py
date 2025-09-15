@@ -42,6 +42,11 @@ def setup_google_credentials():
         if os.path.exists(secret_file_path):
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_file_path
             logger.info(f"✅ Google credentials set from Render secret file: {secret_file_path}")
+            
+            # Debug: Verify the file path and existence
+            print(f"GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
+            print(f"File exists: {os.path.exists(os.environ['GOOGLE_APPLICATION_CREDENTIALS'])}")
+            
             return True
         
         # Method 2: Try local google-credentials.json file
@@ -123,14 +128,18 @@ def initialize_livekit_components():
             logger.error(f"Google credentials file not found: {creds_path}")
             return False
         
-        # Initialize Google STT
+        # Debug: Check Google credentials before initializing
+        print(f"Before LiveKit init - GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
+        print(f"Before LiveKit init - File exists: {os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', ''))}")
+        
+        # Initialize Google STT (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
         stt_engine = google.STT(
             model="latest_long",
             spoken_punctuation=True,
             languages="en-US",
         )
         
-        # Initialize Google TTS
+        # Initialize Google TTS (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
         tts_engine = google.TTS()
         
         # Initialize Google VAD (Voice Activity Detection)
@@ -479,6 +488,20 @@ def health():
     """Health endpoint for Render"""
     return jsonify({"status": "healthy"})
 
+@app.route('/api/debug/credentials')
+def debug_credentials():
+    """Debug endpoint to check Google credentials setup"""
+    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "Not set")
+    
+    return jsonify({
+        "google_application_credentials": creds_path,
+        "file_exists": os.path.exists(creds_path) if creds_path != "Not set" else False,
+        "secret_file_exists": os.path.exists("/etc/secrets/google-credentials.json"),
+        "local_file_exists": os.path.exists("google-credentials.json"),
+        "json_env_var_exists": "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ,
+        "setup_result": google_creds_ok
+    })
+
 @app.route('/api/test', methods=['POST'])
 def test_endpoint():
     """Test endpoint that doesn't require LiveKit"""
@@ -513,9 +536,11 @@ def test_livekit():
     """Test LiveKit components specifically"""
     try:
         # Check Google credentials status
+        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "Not set")
         creds_status = {
             'google_creds_ok': google_creds_ok,
-            'creds_path': os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "Not set"),
+            'creds_path': creds_path,
+            'creds_file_exists': os.path.exists(creds_path) if creds_path != "Not set" else False,
             'secret_file_exists': os.path.exists("/etc/secrets/google-credentials.json"),
             'local_file_exists': os.path.exists("google-credentials.json"),
             'json_env_var': "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ
