@@ -151,8 +151,17 @@ logging.getLogger("livekit").setLevel(logging.DEBUG)
 
 # Salesforce configuration
 SALESFORCE_DOMAIN = os.getenv("SALESFORCE_ORG_DOMAIN", "https://de1740385138027.my.salesforce.com")
-SALESFORCE_CLIENT_ID = os.getenv("SALESFORCE_CLIENT_ID", "YOUR_SALESFORCE_CLIENT_ID")
-SALESFORCE_CLIENT_SECRET = os.getenv("SALESFORCE_CLIENT_SECRET", "YOUR_SALESFORCE_CLIENT_SECRET")
+SALESFORCE_CLIENT_ID = os.getenv("SALESFORCE_CLIENT_ID")
+SALESFORCE_CLIENT_SECRET = os.getenv("SALESFORCE_CLIENT_SECRET")
+
+# Validate Salesforce configuration
+if not SALESFORCE_CLIENT_ID or SALESFORCE_CLIENT_ID == "YOUR_SALESFORCE_CLIENT_ID":
+    print("❌ SALESFORCE_CLIENT_ID environment variable not set")
+    logger.error("SALESFORCE_CLIENT_ID environment variable not set")
+
+if not SALESFORCE_CLIENT_SECRET or SALESFORCE_CLIENT_SECRET == "YOUR_SALESFORCE_CLIENT_SECRET":
+    print("❌ SALESFORCE_CLIENT_SECRET environment variable not set")
+    logger.error("SALESFORCE_CLIENT_SECRET environment variable not set")
 
 # LiveKit components (will be initialized when needed)
 stt_engine = None
@@ -275,13 +284,21 @@ SalesforceLLM = None
 async def call_einstein_agent(message, session_id, agent_id=None):
     """Call Salesforce Einstein Agent API with dynamic agent ID"""
     try:
+        print(f"🔧 Einstein Agent Call Debug:")
+        print(f"  - Message: {message}")
+        print(f"  - Session ID: {session_id}")
+        print(f"  - Agent ID: {agent_id}")
+        
         # Agent ID is required - must be provided dynamically
         if not agent_id:
+            print("❌ Error: Agent ID is required but not provided")
             return "Error: Agent ID is required but not provided"
         
         # Get Salesforce access token
+        print("🔧 Getting Salesforce access token...")
         access_token = await get_salesforce_access_token()
         if not access_token:
+            print("❌ Failed to get Salesforce access token")
             return "I'm sorry, I'm having trouble connecting to Salesforce right now."
         
         headers = {
@@ -291,6 +308,7 @@ async def call_einstein_agent(message, session_id, agent_id=None):
         
         # Use the provided agent_id dynamically
         url = f"https://api.salesforce.com/einstein/ai-agent/v1/agents/{agent_id}/sessions/{session_id}/messages"
+        print(f"🔧 Einstein Agent URL: {url}")
         
         payload = {
             "message": {
@@ -335,6 +353,13 @@ async def call_einstein_agent(message, session_id, agent_id=None):
 async def get_salesforce_access_token():
     """Get Salesforce access token using OAuth2 Client Credentials flow"""
     try:
+        # Check if credentials are properly set
+        if not SALESFORCE_CLIENT_ID or not SALESFORCE_CLIENT_SECRET:
+            print("❌ Salesforce credentials not properly configured")
+            print(f"  - CLIENT_ID set: {bool(SALESFORCE_CLIENT_ID)}")
+            print(f"  - CLIENT_SECRET set: {bool(SALESFORCE_CLIENT_SECRET)}")
+            return None
+        
         auth_url = f"{SALESFORCE_DOMAIN}/services/oauth2/token"
         auth_data = {
             'grant_type': 'client_credentials',
@@ -342,19 +367,31 @@ async def get_salesforce_access_token():
             'client_secret': SALESFORCE_CLIENT_SECRET
         }
         
+        print(f"🔧 Salesforce Auth Debug:")
+        print(f"  - Domain: {SALESFORCE_DOMAIN}")
+        print(f"  - Client ID: {SALESFORCE_CLIENT_ID[:20]}...")
+        print(f"  - Auth URL: {auth_url}")
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(auth_url, data=auth_data) as response:
+                print(f"🔧 Auth Response Status: {response.status}")
+                
                 if response.status == 200:
                     result = await response.json()
                     access_token = result["access_token"]
-                    print("Successfully obtained Salesforce access token")
+                    print("✅ Successfully obtained Salesforce access token")
+                    print(f"  - Token: {access_token[:20]}...")
                     return access_token
                 else:
                     error_text = await response.text()
-                    print(f"Failed to get access token: {response.status} - {error_text}")
-                    raise Exception(f"Failed to get Salesforce access token: {response.status}")
+                    print(f"❌ Failed to get access token: {response.status} - {error_text}")
+                    print(f"  - Auth URL: {auth_url}")
+                    print(f"  - Client ID: {SALESFORCE_CLIENT_ID}")
+                    raise Exception(f"Failed to get Salesforce access token: {response.status} - {error_text}")
     except Exception as e:
-        print(f"Error getting Salesforce access token: {e}")
+        print(f"❌ Error getting Salesforce access token: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 @app.route('/')
