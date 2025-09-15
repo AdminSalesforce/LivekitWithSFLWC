@@ -3,7 +3,7 @@ services:
     name: salesforce-voice-agent
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python salesforce_voice_agent.py
+    startCommand: python salesforce_voice_agent.py start
     envVars:
       - key: LIVEKIT_API_KEY
         value: YOUR_LIVEKIT_API_KEY
@@ -21,5 +21,5 @@ services:
         value: YOUR_SALESFORCE_CLIENT_SECRET
       - key: SALESFORCE_AGENT_ID
         value: YOUR_SALESFORCE_AGENT_ID
-      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
-        value: "YOUR_GOOGLE_CREDENTIALS_JSON_HERE"
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: "google-credentials.json"
