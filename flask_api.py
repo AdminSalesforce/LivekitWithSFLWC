@@ -36,10 +36,13 @@ os.environ["LIVEKIT_URL"] = os.getenv("LIVEKIT_URL", "YOUR_LIVEKIT_URL")
 # Handle Google credentials for cloud deployment
 def setup_google_credentials():
     """Setup Google credentials for both local and cloud deployment"""
+    print("🔧 Starting Google credentials setup...")
     try:
         # Method 1: Try Render secret file (for cloud deployment)
         secret_file_path = "/etc/secrets/google-credentials.json"
+        print(f"🔧 Checking secret file: {secret_file_path}")
         if os.path.exists(secret_file_path):
+            print(f"✅ Secret file found: {secret_file_path}")
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_file_path
             logger.info(f"✅ Google credentials set from Render secret file: {secret_file_path}")
             
@@ -48,12 +51,18 @@ def setup_google_credentials():
             print(f"File exists: {os.path.exists(os.environ['GOOGLE_APPLICATION_CREDENTIALS'])}")
             
             return True
+        else:
+            print(f"❌ Secret file not found: {secret_file_path}")
         
         # Method 2: Try local google-credentials.json file
+        print("🔧 Checking local file: google-credentials.json")
         if os.path.exists("google-credentials.json"):
+            print("✅ Local file found: google-credentials.json")
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "google-credentials.json"
             logger.info("✅ Google credentials set from local file: google-credentials.json")
             return True
+        else:
+            print("❌ Local file not found: google-credentials.json")
         
         # Method 3: Try JSON string from environment variable (fallback)
         if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
@@ -81,17 +90,23 @@ def setup_google_credentials():
             return True
         
         # No credentials found
+        print("❌ No Google credentials found!")
         logger.error("❌ No Google credentials found!")
         logger.error("Please add google-credentials.json as a secret file in Render")
         logger.error("Or set GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable")
         return False
         
     except Exception as e:
+        print(f"❌ Failed to setup Google credentials: {e}")
         logger.error(f"❌ Failed to setup Google credentials: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 # Setup Google credentials
+print("🔧 Setting up Google credentials...")
 google_creds_ok = setup_google_credentials()
+print(f"🔧 Google credentials setup result: {google_creds_ok}")
 
 # Set Google API key only if it's provided
 google_api_key = os.getenv("GOOGLE_API_KEY")
