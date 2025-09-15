@@ -14,11 +14,11 @@ import logging
 import time
 from flask_cors import CORS
 
-# LiveKit imports
-from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm, Agent, ConversationItemAddedEvent, UserInputTranscribedEvent
-from livekit.agents.voice import AgentSession
-from livekit.plugins import google
-from livekit import rtc
+# LiveKit imports - moved to function level to prevent import-time initialization
+# from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm, Agent, ConversationItemAddedEvent, UserInputTranscribedEvent
+# from livekit.agents.voice import AgentSession
+# from livekit.plugins import google
+# from livekit import rtc
 
 app = Flask(__name__)
 CORS(app)
@@ -140,6 +140,15 @@ def initialize_livekit_components():
     print("🚀 Starting LiveKit components initialization...")
     
     try:
+        # Import LiveKit modules here to prevent import-time initialization errors
+        print("🔧 Importing LiveKit modules...")
+        from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm, Agent, ConversationItemAddedEvent, UserInputTranscribedEvent
+        from livekit.agents.voice import AgentSession
+        from livekit.plugins import google
+        from livekit import rtc
+        print("✅ LiveKit modules imported successfully")
+        
+        # Now we can use the imported modules
         # Check if Google credentials are properly set
         if not google_creds_ok:
             print("❌ Google credentials not available, skipping LiveKit initialization")
