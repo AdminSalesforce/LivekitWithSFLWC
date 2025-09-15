@@ -122,9 +122,12 @@ def initialize_livekit_components():
     """Initialize LiveKit components for voice processing"""
     global stt_engine, tts_engine, vad_engine, agent_session, agent, llm_engine
     
+    print("🚀 Starting LiveKit components initialization...")
+    
     try:
         # Check if Google credentials are properly set
         if not google_creds_ok:
+            print("❌ Google credentials not available, skipping LiveKit initialization")
             logger.warning("Google credentials not available, skipping LiveKit initialization")
             return False
         
@@ -182,18 +185,36 @@ def initialize_livekit_components():
             raise e
         
         # Initialize Salesforce LLM
-        llm_engine = SalesforceLLM()
+        try:
+            print("🔧 Initializing Salesforce LLM...")
+            llm_engine = SalesforceLLM()
+            print("✅ Salesforce LLM initialized successfully")
+        except Exception as e:
+            print(f"❌ Failed to initialize Salesforce LLM: {e}")
+            raise e
         
         # Create AgentSession with STT and TTS
-        agent_session = AgentSession(
-            stt=stt_engine,
-            tts=tts_engine,
-        )
+        try:
+            print("🔧 Creating AgentSession...")
+            agent_session = AgentSession(
+                stt=stt_engine,
+                tts=tts_engine,
+            )
+            print("✅ AgentSession created successfully")
+        except Exception as e:
+            print(f"❌ Failed to create AgentSession: {e}")
+            raise e
         
         # Create Agent
-        agent = Agent(
-            instructions="You are a helpful Salesforce voice assistant. Help users with their Salesforce cases and questions. Always provide helpful and engaging responses."
-        )
+        try:
+            print("🔧 Creating Agent...")
+            agent = Agent(
+                instructions="You are a helpful Salesforce voice assistant. Help users with their Salesforce cases and questions. Always provide helpful and engaging responses."
+            )
+            print("✅ Agent created successfully")
+        except Exception as e:
+            print(f"❌ Failed to create Agent: {e}")
+            raise e
         
         logger.info("LiveKit components initialized successfully")
         return True
@@ -489,7 +510,14 @@ def health_check():
     """Health check endpoint"""
     # Initialize LiveKit components if not already done
     if not stt_engine or not tts_engine:
-        initialize_livekit_components()
+        print("🔧 Health check: Initializing LiveKit components...")
+        try:
+            result = initialize_livekit_components()
+            print(f"🔧 Health check: LiveKit initialization result: {result}")
+        except Exception as e:
+            print(f"❌ Health check: LiveKit initialization failed: {e}")
+            import traceback
+            traceback.print_exc()
     
     return jsonify({
         "status": "running",
