@@ -523,16 +523,8 @@ async def call_einstein_agent(message, session_id, agent_id=None):
 @app.route('/')
 def health_check():
     """Health check endpoint"""
-    # Initialize LiveKit components if not already done
-    if not stt_engine or not tts_engine:
-        print("🔧 Health check: Initializing LiveKit components...")
-        try:
-            result = initialize_livekit_components()
-            print(f"🔧 Health check: LiveKit initialization result: {result}")
-        except Exception as e:
-            print(f"❌ Health check: LiveKit initialization failed: {e}")
-            import traceback
-            traceback.print_exc()
+    # Don't automatically initialize LiveKit components in health check
+    # This prevents the error from occurring on every request
     
     return jsonify({
         "status": "running",
@@ -580,6 +572,33 @@ def debug_credentials():
         "json_env_var_exists": "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ,
         "setup_result": google_creds_ok
     })
+
+@app.route('/api/debug/init-livekit')
+def debug_init_livekit():
+    """Debug endpoint to manually initialize LiveKit components"""
+    try:
+        print("🔧 Manual LiveKit initialization requested...")
+        result = initialize_livekit_components()
+        print(f"🔧 Manual LiveKit initialization result: {result}")
+        
+        return jsonify({
+            "success": result,
+            "stt_engine": stt_engine is not None,
+            "tts_engine": tts_engine is not None,
+            "vad_engine": vad_engine is not None,
+            "agent_session": agent_session is not None,
+            "agent": agent is not None,
+            "llm_engine": llm_engine is not None
+        })
+    except Exception as e:
+        print(f"❌ Manual LiveKit initialization failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
 
 @app.route('/api/test', methods=['POST'])
 def test_endpoint():
