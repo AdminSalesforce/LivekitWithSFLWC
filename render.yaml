@@ -3,7 +3,7 @@ services:
     name: salesforce-voice-agent
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python salesforce_voice_agent.py start
+    startCommand: python main.py
     envVars:
       - key: LIVEKIT_API_KEY
         value: YOUR_LIVEKIT_API_KEY
