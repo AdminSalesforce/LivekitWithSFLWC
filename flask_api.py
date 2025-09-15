@@ -37,30 +37,45 @@ os.environ["LIVEKIT_URL"] = os.getenv("LIVEKIT_URL", "YOUR_LIVEKIT_URL")
 def setup_google_credentials():
     """Setup Google credentials for both local and cloud deployment"""
     try:
+        # Method 1: Try JSON string from environment variable (for cloud deployment)
         if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
-            # Use JSON string from environment variable (for cloud deployment)
             creds_json = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
-            creds_data = json.loads(creds_json)
-            
-            # Create temporary file for Google credentials
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                json.dump(creds_data, f)
-                creds_path = f.name
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-                logger.info(f"Google credentials set from JSON string: {creds_path}")
-                return True
-        else:
-            # Use credentials file (for local deployment)
-            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google-credentials.json")
-            if os.path.exists(creds_path):
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-                logger.info(f"Google credentials set from file: {creds_path}")
-                return True
-            else:
-                logger.warning(f"Google credentials file not found: {creds_path}")
+            logger.info("Found GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable")
+            try:
+                creds_data = json.loads(creds_json)
+                
+                # Create temporary file for Google credentials
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                    json.dump(creds_data, f)
+                    creds_path = f.name
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+                    logger.info(f"✅ Google credentials set from JSON string: {creds_path}")
+                    return True
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Invalid JSON in GOOGLE_APPLICATION_CREDENTIALS_JSON: {e}")
                 return False
+        
+        # Method 2: Try direct file path (for local deployment)
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google-credentials.json")
+        if os.path.exists(creds_path):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+            logger.info(f"✅ Google credentials set from file: {creds_path}")
+            return True
+        
+        # Method 3: Try to use the uploaded google-credentials.json file
+        if os.path.exists("google-credentials.json"):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "google-credentials.json"
+            logger.info("✅ Google credentials set from uploaded file: google-credentials.json")
+            return True
+        
+        # No credentials found
+        logger.error("❌ No Google credentials found!")
+        logger.error("Please set GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable in Render")
+        logger.error("Or upload google-credentials.json file to the project")
+        return False
+        
     except Exception as e:
-        logger.error(f"Failed to setup Google credentials: {e}")
+        logger.error(f"❌ Failed to setup Google credentials: {e}")
         return False
 
 # Setup Google credentials
@@ -90,6 +105,17 @@ def initialize_livekit_components():
     global stt_engine, tts_engine, vad_engine, agent_session, agent, llm_engine
     
     try:
+        # Check if Google credentials are properly set
+        if not google_creds_ok:
+            logger.warning("Google credentials not available, skipping LiveKit initialization")
+            return False
+        
+        # Verify Google credentials file exists and is readable
+        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if not creds_path or not os.path.exists(creds_path):
+            logger.error(f"Google credentials file not found: {creds_path}")
+            return False
+        
         # Initialize Google STT
         stt_engine = google.STT(
             model="latest_long",
@@ -416,7 +442,11 @@ def health_check():
     return jsonify({
         "status": "running",
         "message": "Salesforce Voice Agent API with Einstein Agent and LiveKit is running",
-        "google_credentials": google_creds_ok,
+        "google_credentials": {
+            "available": google_creds_ok,
+            "path": os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "Not set"),
+            "json_env_var": "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ
+        },
         "salesforce_domain": SALESFORCE_DOMAIN,
         "agent_id": "dynamic (provided in requests)",
         "livekit_url": os.environ.get("LIVEKIT_URL"),
@@ -439,6 +469,83 @@ def health_check():
 def health():
     """Health endpoint for Render"""
     return jsonify({"status": "healthy"})
+
+@app.route('/api/test', methods=['POST'])
+def test_endpoint():
+    """Test endpoint that doesn't require LiveKit"""
+    try:
+        data = request.get_json()
+        if not data or 'message' not in data:
+            return jsonify({'error': 'Message is required'}), 400
+        
+        message = data['message']
+        agent_id = data.get('agent_id')
+        
+        if not agent_id:
+            return jsonify({'error': 'Agent ID is required'}), 400
+        
+        # Test Salesforce connection without LiveKit
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        response = loop.run_until_complete(call_einstein_agent(message, "test-session", agent_id))
+        loop.close()
+        
+        return jsonify({
+            'response': response,
+            'agent_id': agent_id,
+            'livekit_available': stt_engine is not None and tts_engine is not None
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/livekit/test', methods=['POST'])
+def test_livekit():
+    """Test LiveKit components specifically"""
+    try:
+        # Check Google credentials status
+        creds_status = {
+            'google_creds_ok': google_creds_ok,
+            'creds_path': os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "Not set"),
+            'json_env_var': "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ,
+            'file_exists': os.path.exists("google-credentials.json")
+        }
+        
+        # Try to initialize LiveKit components
+        livekit_init_result = initialize_livekit_components()
+        
+        # Test Google STT if available
+        stt_test_result = None
+        if stt_engine:
+            try:
+                # This is just a test - we can't actually process audio without a real audio file
+                stt_test_result = "STT engine initialized successfully"
+            except Exception as e:
+                stt_test_result = f"STT test failed: {str(e)}"
+        
+        # Test Google TTS if available
+        tts_test_result = None
+        if tts_engine:
+            try:
+                # This is just a test - we can't actually generate audio without text
+                tts_test_result = "TTS engine initialized successfully"
+            except Exception as e:
+                tts_test_result = f"TTS test failed: {str(e)}"
+        
+        return jsonify({
+            'livekit_initialized': livekit_init_result,
+            'google_credentials': creds_status,
+            'stt_test': stt_test_result,
+            'tts_test': tts_test_result,
+            'components': {
+                'stt_engine': stt_engine is not None,
+                'tts_engine': tts_engine is not None,
+                'vad_engine': vad_engine is not None
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/voice-query', methods=['POST'])
 def handle_voice_query():
