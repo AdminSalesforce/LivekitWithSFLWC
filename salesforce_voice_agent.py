@@ -39,8 +39,8 @@ if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
         json.dump(creds_data, f)
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = f.name
 else:
-    # Fallback to file path (for local development)
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "YOUR_GOOGLE_CREDENTIALS_FILE_PATH"
+    # Use credentials file (for both local and cloud deployment)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google-credentials.json")
 
 os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY", "YOUR_GOOGLE_API_KEY")
 os.environ["SALESFORCE_ORG_DOMAIN"] = os.getenv("SALESFORCE_ORG_DOMAIN", "YOUR_SALESFORCE_ORG_DOMAIN")
