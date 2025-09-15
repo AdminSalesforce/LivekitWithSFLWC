@@ -1,0 +1,56 @@
+{
+  "name": "salesforce-voice-agent",
+  "description": "Salesforce Voice Agent with LiveKit integration",
+  "repository": "https://github.com/your-username/salesforce-voice-agent",
+  "logo": "https://salesforce.com/favicon.ico",
+  "keywords": ["salesforce", "voice", "ai", "livekit", "einstein"],
+  "env": {
+    "LIVEKIT_API_KEY": {
+      "description": "LiveKit API Key",
+      "required": true
+    },
+    "LIVEKIT_API_SECRET": {
+      "description": "LiveKit API Secret",
+      "required": true
+    },
+    "LIVEKIT_URL": {
+      "description": "LiveKit WebSocket URL",
+      "required": true
+    },
+    "GOOGLE_APPLICATION_CREDENTIALS_JSON": {
+      "description": "Google Service Account JSON (base64 encoded)",
+      "required": true
+    },
+    "GOOGLE_API_KEY": {
+      "description": "Google API Key",
+      "required": true
+    },
+    "SALESFORCE_ORG_DOMAIN": {
+      "description": "Salesforce Org Domain",
+      "required": true
+    },
+    "SALESFORCE_CLIENT_ID": {
+      "description": "Salesforce Connected App Client ID",
+      "required": true
+    },
+    "SALESFORCE_CLIENT_SECRET": {
+      "description": "Salesforce Connected App Client Secret",
+      "required": true
+    },
+    "SALESFORCE_AGENT_ID": {
+      "description": "Salesforce Einstein Agent ID",
+      "required": true
+    }
+  },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}
