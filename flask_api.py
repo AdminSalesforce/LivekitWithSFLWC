@@ -28,9 +28,34 @@ def setup_google_credentials():
         print(f"🔧 Checking secret file: {secret_file_path}")
         if os.path.exists(secret_file_path):
             print(f"✅ Secret file found: {secret_file_path}")
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_file_path
-            logger.info(f"✅ Google credentials set from Render secret file: {secret_file_path}")
-            return True
+            
+            # Fix the private key format in the credentials file
+            try:
+                with open(secret_file_path, 'r') as f:
+                    creds_data = json.load(f)
+                
+                # Fix private key format - ensure it has proper line breaks
+                if 'private_key' in creds_data:
+                    private_key = creds_data['private_key']
+                    # Replace escaped newlines with actual newlines
+                    if '\\n' in private_key:
+                        creds_data['private_key'] = private_key.replace('\\n', '\n')
+                        
+                    # Write the fixed credentials to a temporary file
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_f:
+                        json.dump(creds_data, temp_f)
+                        temp_creds_path = temp_f.name
+                        
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds_path
+                    print(f"✅ Fixed private key format and set credentials: {temp_creds_path}")
+                    logger.info(f"✅ Google credentials set from Render secret file with fixed private key: {temp_creds_path}")
+                    return True
+            except Exception as e:
+                print(f"❌ Error fixing credentials file: {e}")
+                # Fallback to original file
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_file_path
+                logger.info(f"✅ Google credentials set from Render secret file: {secret_file_path}")
+                return True
         else:
             print(f"❌ Secret file not found: {secret_file_path}")
         
