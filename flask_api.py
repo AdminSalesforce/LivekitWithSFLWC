@@ -354,11 +354,14 @@ async def start_salesforce_session(agent_id, session_id):
                 
                 if response.status == 200:
                     result = await response.json()
-                    print(f"✅ Session started successfully: {result}")
+                    print(f"✅ Session started successfully")
+                    print(f"  - Full session response: {json.dumps(result, indent=2)}")
                     
                     # Store the actual session ID from Salesforce response
                     salesforce_session_id = result.get('sessionId')
                     print(f"✅ Salesforce session ID: {salesforce_session_id}")
+                    print(f"  - Session ID length: {len(salesforce_session_id) if salesforce_session_id else 0}")
+                    print(f"  - Response keys: {list(result.keys())}")
                     return salesforce_session_id
                 else:
                     text = await response.text()
@@ -423,25 +426,36 @@ async def call_einstein_agent(message, session_id, agent_id=None):
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload) as response:
                 print(f"🔧 Salesforce API response status: {response.status}")
+                print(f"🔧 Response headers: {dict(response.headers)}")
                 
                 if response.status == 200:
                     result = await response.json()
-                    print(f"✅ Salesforce response: {result}")
+                    print(f"✅ Salesforce message response received")
+                    print(f"  - Full response: {json.dumps(result, indent=2)}")
+                    print(f"  - Response keys: {list(result.keys())}")
                     
                     # Parse the response according to your working structure
                     if 'message' in result:
                         # Direct message response
-                        return result.get('message', 'No response message')
+                        message_text = result.get('message', 'No response message')
+                        print(f"✅ Direct message response: {message_text}")
+                        return message_text
                     elif 'messages' in result:
                         # Array response format
                         messages = result.get('messages', [])
+                        print(f"  - Messages array length: {len(messages)}")
+                        
                         if messages and len(messages) > 0:
                             message_obj = messages[0]
                             message_type = message_obj.get('type', '')
+                            print(f"  - First message type: {message_type}")
+                            print(f"  - First message content: {json.dumps(message_obj, indent=2)}")
                             
                             # Handle different response types
                             if message_type == 'Inform':
-                                return message_obj.get('message', 'No response message')
+                                response_text = message_obj.get('message', 'No response message')
+                                print(f"✅ Inform response: {response_text}")
+                                return response_text
                             elif message_type == 'Failure':
                                 # Handle failure responses
                                 print(f"❌ Salesforce returned Failure: {message_obj}")
@@ -461,13 +475,19 @@ async def call_einstein_agent(message, session_id, agent_id=None):
                                 
                                 return "I'm sorry, I'm having trouble connecting to Salesforce right now."
                             elif message_type == 'Text':
-                                return message_obj.get('text', 'No response text')
+                                response_text = message_obj.get('text', 'No response text')
+                                print(f"✅ Text response: {response_text}")
+                                return response_text
                             else:
                                 # For any other type, try to get the message field
-                                return message_obj.get('message', f'Received response type: {message_type}')
+                                response_text = message_obj.get('message', f'Received response type: {message_type}')
+                                print(f"✅ Other response type ({message_type}): {response_text}")
+                                return response_text
                         else:
+                            print("❌ No messages in response array")
                             return "No messages in response"
                     else:
+                        print("❌ No message or messages field in response")
                         return "No response message found"
                 elif response.status == 404:
                     error_text = await response.text()
@@ -515,6 +535,8 @@ async def get_salesforce_access_token():
                     access_token = result["access_token"]
                     print("✅ Successfully obtained Salesforce access token")
                     print(f"  - Token: {access_token[:20]}...")
+                    print(f"  - Token length: {len(access_token)}")
+                    print(f"  - Full response: {json.dumps(result, indent=2)}")
                     return access_token
                 else:
                     error_text = await response.text()
@@ -958,10 +980,9 @@ async def process_text_with_tts(text, language='en-US', voice='en-US-Wavenet-A')
             print("❌ TTS engine not available")
             return None
         
-        # Use LiveKit TTS with language parameter only (voice parameter not supported)
+        # Use LiveKit TTS with only text parameter (voice and language parameters not supported)
         audio_stream = tts_engine.synthesize(
-            text=text,
-            language=language
+            text=text
         )
         
         print("🔧 TTS synthesis started...")
