@@ -39,7 +39,11 @@ def setup_google_credentials():
                     private_key = creds_data['private_key']
                     # Replace escaped newlines with actual newlines
                     if '\\n' in private_key:
-                        creds_data['private_key'] = private_key.replace('\\n', '\n')
+                        private_key = private_key.replace('\\n', '\n')
+                        # Ensure proper PEM format
+                        if not private_key.startswith('-----BEGIN'):
+                            private_key = '-----BEGIN PRIVATE KEY-----\n' + private_key + '\n-----END PRIVATE KEY-----'
+                        creds_data['private_key'] = private_key
                         
                     # Write the fixed credentials to a temporary file
                     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_f:
@@ -217,14 +221,10 @@ def initialize_livekit_components():
             print(f"❌ Failed to initialize Google TTS: {e}")
             raise e
         
-        # Initialize Google VAD (Voice Activity Detection)
-        try:
-            print("🔧 Initializing Google VAD...")
-            vad_engine = google.VAD()
-            print("✅ Google VAD initialized successfully")
-        except Exception as e:
-            print(f"❌ Failed to initialize Google VAD: {e}")
-            raise e
+        # VAD (Voice Activity Detection) is not available in current LiveKit version
+        # Skip VAD initialization
+        print("🔧 Skipping VAD initialization (not available in current LiveKit version)")
+        vad_engine = None
         
         # Create AgentSession with STT and TTS
         try:
