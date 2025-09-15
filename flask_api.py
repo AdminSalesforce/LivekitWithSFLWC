@@ -149,6 +149,7 @@ def initialize_livekit_components():
         # Verify Google credentials file exists and is readable
         creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         if not creds_path or not os.path.exists(creds_path):
+            print(f"❌ Google credentials file not found: {creds_path}")
             logger.error(f"Google credentials file not found: {creds_path}")
             return False
         
@@ -166,6 +167,8 @@ def initialize_livekit_components():
                 print("✅ Credentials file is valid JSON")
         except Exception as e:
             print(f"❌ Error reading credentials file: {e}")
+            import traceback
+            traceback.print_exc()
             return False
         
         # Initialize Google STT (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
@@ -578,6 +581,11 @@ def debug_init_livekit():
     """Debug endpoint to manually initialize LiveKit components"""
     try:
         print("🔧 Manual LiveKit initialization requested...")
+        print("🔧 Current Google credentials status:")
+        print(f"  - GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
+        print(f"  - File exists: {os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', ''))}")
+        print(f"  - Google creds OK: {google_creds_ok}")
+        
         result = initialize_livekit_components()
         print(f"🔧 Manual LiveKit initialization result: {result}")
         
@@ -588,7 +596,10 @@ def debug_init_livekit():
             "vad_engine": vad_engine is not None,
             "agent_session": agent_session is not None,
             "agent": agent is not None,
-            "llm_engine": llm_engine is not None
+            "llm_engine": llm_engine is not None,
+            "google_credentials_path": os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'),
+            "google_credentials_file_exists": os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', '')),
+            "google_creds_ok": google_creds_ok
         })
     except Exception as e:
         print(f"❌ Manual LiveKit initialization failed: {e}")
@@ -597,7 +608,10 @@ def debug_init_livekit():
         return jsonify({
             "success": False,
             "error": str(e),
-            "traceback": traceback.format_exc()
+            "traceback": traceback.format_exc(),
+            "google_credentials_path": os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'),
+            "google_credentials_file_exists": os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', '')),
+            "google_creds_ok": google_creds_ok
         })
 
 @app.route('/api/test', methods=['POST'])
