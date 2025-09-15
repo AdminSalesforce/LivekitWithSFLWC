@@ -301,6 +301,76 @@ def initialize_livekit_components():
 # to avoid import-time dependencies
 SalesforceLLM = None
 
+async def start_salesforce_session(agent_id, session_id):
+    """Start a Salesforce Einstein Agent session"""
+    try:
+        print(f"🔧 Starting Salesforce session:")
+        print(f"  - Agent ID: {agent_id}")
+        print(f"  - Session ID: {session_id}")
+        
+        # Get access token first
+        access_token = await get_salesforce_access_token()
+        if not access_token:
+            print("❌ Failed to get Salesforce access token")
+            return None
+        
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Use api.salesforce.com for session creation
+        url = f"https://api.salesforce.com/einstein/ai-agent/v1/agents/{agent_id}/sessions"
+        print(f"🔧 Session creation URL: {url}")
+        
+        # Match your working payload structure exactly
+        payload = {
+            "externalSessionKey": session_id,
+            "instanceConfig": {
+                "endpoint": SALESFORCE_DOMAIN
+            },
+            "tz": "America/Los_Angeles",
+            "variables": [
+                {
+                    "name": "$Context.EndUserLanguage",
+                    "type": "Text",
+                    "value": "en_US"
+                }
+            ],
+            "featureSupport": "Streaming",
+            "streamingCapabilities": {
+                "chunkTypes": [
+                    "Text"
+                ]
+            },
+            "bypassUser": False
+        }
+        
+        print(f"🔧 Session payload: {json.dumps(payload, indent=2)}")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                print(f"🔧 Start session response status: {response.status}")
+                
+                if response.status == 200:
+                    result = await response.json()
+                    print(f"✅ Session started successfully: {result}")
+                    
+                    # Store the actual session ID from Salesforce response
+                    salesforce_session_id = result.get('sessionId')
+                    print(f"✅ Salesforce session ID: {salesforce_session_id}")
+                    return salesforce_session_id
+                else:
+                    text = await response.text()
+                    print(f"❌ Failed to start session: {text}")
+                    return None
+                    
+    except Exception as e:
+        print(f"❌ Error starting Salesforce session: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 async def call_einstein_agent(message, session_id, agent_id=None):
     """Call Salesforce Einstein Agent API with dynamic agent ID"""
     try:
@@ -321,15 +391,25 @@ async def call_einstein_agent(message, session_id, agent_id=None):
             print("❌ Failed to get Salesforce access token")
             return "I'm sorry, I'm having trouble connecting to Salesforce right now."
         
+        # Start a Salesforce session first
+        print("🔧 Starting Salesforce session...")
+        salesforce_session_id = await start_salesforce_session(agent_id, session_id)
+        if not salesforce_session_id:
+            print("❌ Failed to start Salesforce session")
+            return "I'm sorry, I'm having trouble connecting to Salesforce right now."
+        
         headers = {
             'Authorization': f'Bearer {access_token}',
             'Content-Type': 'application/json'
         }
         
-        # Use the provided agent_id dynamically
-        url = f"https://api.salesforce.com/einstein/ai-agent/v1/agents/{agent_id}/sessions/{session_id}/messages"
-        print(f"🔧 Einstein Agent URL: {url}")
+        # Use api.salesforce.com for message sending
+        # Use the actual Salesforce session ID, not our local session ID
+        url = f"https://api.salesforce.com/einstein/ai-agent/v1/sessions/{salesforce_session_id}/messages"
+        print(f"🔧 Message URL: {url}")
+        print(f"🔧 Using Salesforce session ID: {salesforce_session_id}")
         
+        # Match your working message payload structure exactly
         payload = {
             "message": {
                 "sequenceId": str(int(time.time() * 1000)),
@@ -338,36 +418,70 @@ async def call_einstein_agent(message, session_id, agent_id=None):
             }
         }
         
+        print(f"🔧 Message payload: {json.dumps(payload, indent=2)}")
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload) as response:
-                logger.info(f"Salesforce API response status: {response.status}")
+                print(f"🔧 Salesforce API response status: {response.status}")
                 
                 if response.status == 200:
                     result = await response.json()
-                    logger.info(f"Salesforce response: {result}")
+                    print(f"✅ Salesforce response: {result}")
                     
+                    # Parse the response according to your working structure
                     if 'message' in result:
+                        # Direct message response
                         return result.get('message', 'No response message')
                     elif 'messages' in result:
+                        # Array response format
                         messages = result.get('messages', [])
                         if messages and len(messages) > 0:
                             message_obj = messages[0]
                             message_type = message_obj.get('type', '')
                             
+                            # Handle different response types
                             if message_type == 'Inform':
+                                return message_obj.get('message', 'No response message')
+                            elif message_type == 'Failure':
+                                # Handle failure responses
+                                print(f"❌ Salesforce returned Failure: {message_obj}")
+                                
+                                # Check if there's a message field with content
+                                if message_obj.get('message'):
+                                    return message_obj.get('message')
+                                
+                                # Check if there are errors with useful information
+                                errors = message_obj.get('errors', [])
+                                if errors and len(errors) > 0:
+                                    error_msg = errors[0]
+                                    if "system error occurred" in error_msg.lower():
+                                        return "I'm sorry, I'm having trouble connecting to Salesforce right now."
+                                    else:
+                                        return f"I encountered an issue: {error_msg}"
+                                
+                                return "I'm sorry, I'm having trouble connecting to Salesforce right now."
+                            elif message_type == 'Text':
                                 return message_obj.get('text', 'No response text')
                             else:
-                                return str(message_obj)
+                                # For any other type, try to get the message field
+                                return message_obj.get('message', f'Received response type: {message_type}')
                         else:
-                            return 'No response messages'
+                            return "No messages in response"
                     else:
-                        return result.get('text', 'No response text')
+                        return "No response message found"
+                elif response.status == 404:
+                    error_text = await response.text()
+                    print(f"❌ Einstein Agent API not available (404): {error_text}")
+                    return "I'm sorry, I'm having trouble connecting to Salesforce right now."
                 else:
                     text = await response.text()
-                    logger.error(f"Salesforce call failed: {text}")
+                    print(f"❌ Salesforce call failed: {response.status} - {text}")
                     return "I'm sorry, I'm having trouble connecting to Salesforce right now."
+                    
     except Exception as e:
-        print(f"Error calling Einstein Agent: {e}")
+        print(f"❌ Error calling Einstein Agent: {e}")
+        import traceback
+        traceback.print_exc()
         return "I'm sorry, I encountered an error processing your request."
 
 async def get_salesforce_access_token():
@@ -410,6 +524,40 @@ async def get_salesforce_access_token():
                     raise Exception(f"Failed to get Salesforce access token: {response.status} - {error_text}")
     except Exception as e:
         print(f"❌ Error getting Salesforce access token: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+async def get_salesforce_agents():
+    """Get list of available Einstein Agents from Salesforce"""
+    try:
+        access_token = await get_salesforce_access_token()
+        if not access_token:
+            return None
+        
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Use api.salesforce.com for getting agents
+        url = "https://api.salesforce.com/einstein/ai-agent/v1/agents"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                print(f"🔧 Agents API Response Status: {response.status}")
+                
+                if response.status == 200:
+                    result = await response.json()
+                    print(f"✅ Found {len(result.get('agents', []))} agents")
+                    return result
+                else:
+                    error_text = await response.text()
+                    print(f"❌ Failed to get agents: {response.status} - {error_text}")
+                    return None
+                    
+    except Exception as e:
+        print(f"❌ Error getting Salesforce agents: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -622,6 +770,40 @@ def test_complete_flow():
             "traceback": traceback.format_exc()
         })
 
+@app.route('/api/salesforce/agents')
+def list_salesforce_agents():
+    """List available Einstein Agents from Salesforce"""
+    try:
+        print("🔧 Listing Salesforce agents...")
+        agents = asyncio.run(get_salesforce_agents())
+        
+        if agents:
+            return jsonify({
+                "success": True,
+                "message": "Successfully retrieved agents",
+                "agents": agents.get('agents', []),
+                "total_count": len(agents.get('agents', []))
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Failed to retrieve agents",
+                "agents": [],
+                "total_count": 0
+            })
+            
+    except Exception as e:
+        print(f"❌ Error listing agents: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "message": "Error listing agents",
+            "error": str(e),
+            "agents": [],
+            "total_count": 0
+        })
+
 @app.route('/api/debug/init-livekit')
 def debug_init_livekit():
     """Debug endpoint to manually initialize LiveKit components"""
@@ -776,10 +958,9 @@ async def process_text_with_tts(text, language='en-US', voice='en-US-Wavenet-A')
             print("❌ TTS engine not available")
             return None
         
-        # Use LiveKit TTS with specific voice settings
+        # Use LiveKit TTS with language parameter only (voice parameter not supported)
         audio_stream = tts_engine.synthesize(
             text=text,
-            voice=voice,
             language=language
         )
         
