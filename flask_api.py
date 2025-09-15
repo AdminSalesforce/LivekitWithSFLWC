@@ -988,10 +988,12 @@ async def process_text_with_tts(text, language='en-US', voice='en-US-Wavenet-A')
         print("🔧 TTS synthesis started...")
         audio_chunks = []
         async for chunk in audio_stream:
-            # Use chunk.audio instead of chunk.data based on working code
-            if hasattr(chunk, 'audio') and chunk.audio:
-                audio_chunks.append(chunk.audio)
-                print(f"🔧 Received audio chunk: {len(chunk.audio)} bytes")
+            # Access audio data from the frame attribute
+            if hasattr(chunk, 'frame') and chunk.frame:
+                # Get the raw audio data from the AudioFrame
+                audio_data = chunk.frame.data
+                audio_chunks.append(audio_data)
+                print(f"🔧 Received audio chunk: {len(audio_data)} bytes")
             else:
                 print(f"🔧 No audio data in chunk: {chunk}")
         
