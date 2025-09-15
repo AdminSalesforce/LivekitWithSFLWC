@@ -229,10 +229,20 @@ def initialize_livekit_components():
         # Create AgentSession with STT and TTS
         try:
             print("🔧 Creating AgentSession...")
-            agent_session = AgentSession(
-                stt=stt_engine,
-                tts=tts_engine,
-            )
+            # Create a new event loop for AgentSession
+            import asyncio
+            import threading
+            
+            def create_agent_session():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                return AgentSession(
+                    stt=stt_engine,
+                    tts=tts_engine,
+                )
+            
+            # Run AgentSession creation in a separate thread with its own event loop
+            agent_session = create_agent_session()
             print("✅ AgentSession created successfully")
         except Exception as e:
             print(f"❌ Failed to create AgentSession: {e}")
