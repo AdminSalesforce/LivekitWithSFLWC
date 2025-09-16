@@ -249,11 +249,17 @@ def initialize_livekit_components():
             print(f"❌ Failed to initialize Google STT: {e}")
             raise e
         
-        # Initialize Google TTS (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
+        # Initialize Google TTS with voice configuration (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
         try:
-            print("🔧 Initializing Google TTS...")
-            tts_engine = google.TTS()
-            print("✅ Google TTS initialized successfully")
+            print("🔧 Initializing Google TTS with voice configuration...")
+            tts_engine = google.TTS(
+                voice=google.TTSVoice(
+                    language="en-US",
+                    name="en-US-Wavenet-A",  # Default voice, can be changed
+                    gender=google.Gender.FEMALE
+                )
+            )
+            print("✅ Google TTS initialized successfully with voice configuration")
         except Exception as e:
             print(f"❌ Failed to initialize Google TTS: {e}")
             raise e
@@ -1083,6 +1089,8 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
     """TTS processing using LiveKit AgentSession.say() approach - exactly like working code"""
     global tts_cache
     
+    print("🔧 process_text_with_tts_sync FUNCTION CALLED")
+    
     try:
         print(f"🔧 Processing TTS for text: {text[:50]}...")
         print(f"Language: {language}, Voice: {voice}")
@@ -1121,7 +1129,7 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
                     asyncio.set_event_loop(loop)
                     
                     # Run the LiveKit session.say() function
-                    result = loop.run_until_complete(process_text_with_livekit_session_say(processed_text))
+                    result = loop.run_until_complete(process_text_with_livekit_session_say(processed_text, language, voice))
                     result_queue.put(result)
                     
                 except Exception as e:
@@ -1181,125 +1189,76 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         return None
 
 
-async def process_text_with_livekit_session_say(text):
-    """TTS processing using LiveKit AgentSession.say() approach - exactly like working code"""
+async def process_text_with_livekit_session_say(text, language='en-US', voice='en-US-Wavenet-A'):
+    """TTS processing using LiveKit approach - optimized for API responses with voice selection"""
     try:
-        print(f"🔧 LiveKit session.say() processing for text: {text[:50]}...")
-        print(f"🔧 AgentSession available: {agent_session is not None}")
+        print(f"🔧 LiveKit TTS processing for text: {text[:50]}...")
+        print(f"🔧 Language: {language}, Voice: {voice}")
+        print(f"🔧 TTS engine available: {tts_engine is not None}")
         
-        if not agent_session:
-            print("❌ LiveKit AgentSession not available")
+        if not tts_engine:
+            print("❌ TTS engine not available")
             return None
         
-        # Use LiveKit AgentSession.say() approach - exactly like working code
-        print("🔧 Using LiveKit AgentSession.say() method...")
+        # Use LiveKit TTS engine directly - this is the LiveKit way for API responses
+        print("🔧 Using LiveKit TTS engine for audio generation...")
         
-        # The working code uses session.say() which internally handles TTS
-        # This is the proper LiveKit way to generate speech
-        print("🔧 Calling agent_session.say()...")
-        
-        # IMPORTANT: This is the correct LiveKit approach - use session.say()
-        # The session.say() method internally uses the TTS engine and handles audio generation
-        # This is exactly what your working code does: await session.say(response)
-        
-        # Use the proper LiveKit session.say() method
-        print("🔧 Calling agent_session.say() - this is the proper LiveKit way...")
-        
-        # The session.say() method is the correct LiveKit approach
-        # It internally handles TTS and returns audio data
-        try:
-            # Create a room context for AgentSession to work properly
-            print("🔧 Creating room context for AgentSession...")
-            
-            # Import LiveKit room components
-            from livekit.rtc import Room, RoomOptions
-            
-            # Create a room for the AgentSession
-            room = Room()
-            
-            # Generate access token for room connection
-            from livekit import api
-            token = api.AccessToken() \
-                .with_identity("agent_participant") \
-                .with_grants(api.VideoGrants(room_join=True, room="agent_room")) \
-                .to_jwt()
-            
-            # Connect to the room (this will start the AgentSession)
-            print("🔧 Connecting to room to start AgentSession...")
-            await room.connect(
-                os.environ.get("LIVEKIT_URL"), 
-                token
+        # Create a new TTS engine with the specified voice - this is the LiveKit way
+        print(f"🔧 Creating TTS engine with voice: {voice}")
+        voice_tts_engine = google.TTS(
+            voice=google.TTSVoice(
+                language=language,
+                name=voice,
+                gender=google.Gender.FEMALE if 'Female' in voice or 'Wavenet-A' in voice else google.Gender.MALE
             )
+        )
+        
+        # Use the TTS engine to generate audio data - this uses LiveKit's TTS
+        audio_stream = voice_tts_engine.synthesize(text=text)
+        print(f"🔧 Audio stream created: {audio_stream}")
+        
+        audio_chunks = []
+        chunk_count = 0
+        
+        # Collect audio chunks
+        print("🔧 Collecting audio chunks...")
+        async for chunk in audio_stream:
+            chunk_count += 1
+            print(f"🔧 Processing chunk {chunk_count}: {type(chunk)}")
             
-            # Start the AgentSession with the room
-            print("🔧 Starting AgentSession with room...")
-            await agent_session.start(room=room, agent=agent)
-            
-            # Now we can use session.say() properly
-            print("🔧 AgentSession is now running, calling session.say()...")
-            await agent_session.say(text)
-            print("✅ LiveKit session.say() completed successfully")
-            
-            # For API response, we need to generate audio data using the TTS engine
-            # The session.say() handles the LiveKit room streaming, but we need audio for API
-            print("🔧 Generating audio data for API response using TTS engine...")
-            
-            if not tts_engine:
-                print("❌ TTS engine not available for audio generation")
-                return None
-            
-            # Use the TTS engine to generate audio data for API response
-            audio_stream = tts_engine.synthesize(text=text)
-            print(f"🔧 Audio stream created: {audio_stream}")
-            
-            audio_chunks = []
-            chunk_count = 0
-            
-            # Collect audio chunks
-            print("🔧 Collecting audio chunks...")
-            async for chunk in audio_stream:
-                chunk_count += 1
-                print(f"🔧 Processing chunk {chunk_count}: {type(chunk)}")
-                
-                if hasattr(chunk, 'frame') and chunk.frame:
-                    audio_data = chunk.frame.data
-                    audio_chunks.append(audio_data)
-                    print(f"🔧 Collected audio chunk {chunk_count}: {len(audio_data)} bytes")
-                elif hasattr(chunk, 'data'):
-                    audio_data = chunk.data
-                    audio_chunks.append(audio_data)
-                    print(f"🔧 Collected audio chunk {chunk_count} (data): {len(audio_data)} bytes")
-                else:
-                    print(f"🔧 Chunk {chunk_count} has no frame or data: {dir(chunk)}")
-            
-            print(f"🔧 Total chunks collected: {chunk_count}")
-            print(f"🔧 Audio chunks list length: {len(audio_chunks)}")
-            
-            if not audio_chunks:
-                print("❌ No audio chunks collected")
-                return None
-                
-            full_audio_bytes = b"".join(audio_chunks)
-            print(f"✅ Total audio bytes collected: {len(full_audio_bytes)}")
-            
-            if len(full_audio_bytes) == 0:
-                print("❌ Empty audio data")
-                return None
-            
-            # Convert to WAV format
-            print("🔧 Creating WAV file...")
-            wav_audio = create_wav_file(full_audio_bytes)
-            print(f"🔧 WAV file created: {len(wav_audio)} bytes")
-            
-            audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
-            print(f"✅ WAV audio created: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
-            return audio_base64
-            
-        except Exception as e:
-            print(f"❌ Error in LiveKit session.say(): {e}")
-            import traceback
-            traceback.print_exc()
+            if hasattr(chunk, 'frame') and chunk.frame:
+                audio_data = chunk.frame.data
+                audio_chunks.append(audio_data)
+                print(f"🔧 Collected audio chunk {chunk_count}: {len(audio_data)} bytes")
+            elif hasattr(chunk, 'data'):
+                audio_data = chunk.data
+                audio_chunks.append(audio_data)
+                print(f"🔧 Collected audio chunk {chunk_count} (data): {len(audio_data)} bytes")
+            else:
+                print(f"🔧 Chunk {chunk_count} has no frame or data: {dir(chunk)}")
+        
+        print(f"🔧 Total chunks collected: {chunk_count}")
+        print(f"🔧 Audio chunks list length: {len(audio_chunks)}")
+        
+        if not audio_chunks:
+            print("❌ No audio chunks collected")
             return None
+            
+        full_audio_bytes = b"".join(audio_chunks)
+        print(f"✅ Total audio bytes collected: {len(full_audio_bytes)}")
+        
+        if len(full_audio_bytes) == 0:
+            print("❌ Empty audio data")
+            return None
+        
+        # Convert to WAV format
+        print("🔧 Creating WAV file...")
+        wav_audio = create_wav_file(full_audio_bytes)
+        print(f"🔧 WAV file created: {len(wav_audio)} bytes")
+        
+        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
+        print(f"✅ WAV audio created: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
+        return audio_base64
         
     except Exception as e:
         print(f"❌ Error in process_text_with_livekit_session_say: {e}")
@@ -1433,6 +1392,8 @@ def text_to_speech():
             print("❌ Error: Text is required")
             return jsonify({"error": "Text is required"}), 400
         
+        print("🔧 TTS endpoint reached successfully")
+        
         print(f"🔧 TTS engine check: {tts_engine is not None}")
         print(f"🔧 AgentSession check: {agent_session is not None}")
         
@@ -1454,6 +1415,10 @@ def text_to_speech():
         print(f"🔧 process_text_with_tts_sync returned: {type(audio_content)}")
         
         print(f"✅ TTS generated, audio length: {len(audio_content) if audio_content else 'null'}")
+        
+        if audio_content is None:
+            print("❌ TTS returned None - no audio generated")
+            return jsonify({"error": "Failed to generate audio"}), 500
         
         response_data = {
             "audio_content": audio_content,
