@@ -53,6 +53,44 @@ def preprocess_text_for_tts(text):
     
     import re
     
+    # Check if we should use SSML (can be disabled for debugging)
+    use_ssml = os.environ.get('USE_SSML', 'true').lower() == 'true'
+    
+    if not use_ssml:
+        print("🔧 SSML disabled, using simple text preprocessing")
+        # Simple preprocessing without SSML
+        processed_text = text
+        
+        # Add natural speech patterns
+        processed_text = processed_text.replace('I am', "I'm")
+        processed_text = processed_text.replace('I will', "I'll")
+        processed_text = processed_text.replace('I have', "I've")
+        processed_text = processed_text.replace('I would', "I'd")
+        processed_text = processed_text.replace('I can', "I can")
+        processed_text = processed_text.replace('I cannot', "I can't")
+        processed_text = processed_text.replace('do not', "don't")
+        processed_text = processed_text.replace('does not', "doesn't")
+        processed_text = processed_text.replace('will not', "won't")
+        processed_text = processed_text.replace('cannot', "can't")
+        processed_text = processed_text.replace('should not', "shouldn't")
+        processed_text = processed_text.replace('would not', "wouldn't")
+        processed_text = processed_text.replace('could not', "couldn't")
+        
+        # Simple number replacement for better pronunciation
+        processed_text = re.sub(r'\b0\b', 'zero', processed_text)
+        processed_text = re.sub(r'\b1\b', 'one', processed_text)
+        processed_text = re.sub(r'\b2\b', 'two', processed_text)
+        processed_text = re.sub(r'\b3\b', 'three', processed_text)
+        processed_text = re.sub(r'\b4\b', 'four', processed_text)
+        processed_text = re.sub(r'\b5\b', 'five', processed_text)
+        processed_text = re.sub(r'\b6\b', 'six', processed_text)
+        processed_text = re.sub(r'\b7\b', 'seven', processed_text)
+        processed_text = re.sub(r'\b8\b', 'eight', processed_text)
+        processed_text = re.sub(r'\b9\b', 'nine', processed_text)
+        
+        print(f"🔧 Simple text preprocessing: '{text[:50]}...' → '{processed_text[:50]}...'")
+        return processed_text
+    
     # Start with SSML wrapper
     processed_text = f"<speak>{text}</speak>"
     
@@ -167,18 +205,13 @@ async def generate_tts():
            print("❌ Empty text provided")
            return None
        
-       # Generate audio using LiveKit TTS synthesize method with SSML
-       print("🔧 Calling tts_engine.synthesize() with SSML...")
-       print(f"🔧 SSML input: {text[:200]}...")
+       # Generate audio using LiveKit TTS synthesize method
+       print("🔧 Calling tts_engine.synthesize()...")
+       print(f"🔧 Input text: {text[:200]}...")
        
-       # Check if text contains SSML tags
-       if '<speak>' in text and '</speak>' in text:
-           print("🔧 Detected SSML input, using SSML synthesis")
-           # Use SSML synthesis for better pronunciation
-           audio_stream = tts_engine.synthesize(ssml=text)
-       else:
-           print("🔧 Plain text input, using regular synthesis")
-           audio_stream = tts_engine.synthesize(text=text)
+       # LiveKit TTS handles SSML automatically when text contains SSML tags
+       # No need to specify ssml parameter separately
+       audio_stream = tts_engine.synthesize(text=text)
        
        print("✅ Audio stream created")
        
@@ -187,19 +220,58 @@ async def generate_tts():
        # Process audio stream
        print("🔧 Processing audio stream...")
        try:
-           async for chunk in audio_stream:
-               if hasattr(chunk, 'frame') and chunk.frame:
-                   audio_data = chunk.frame.data
-                   audio_chunks.append(audio_data)
-                   print(f"🔧 Collected chunk: {{len(audio_data)}} bytes")
-               elif hasattr(chunk, 'data'):
-                   audio_data = chunk.data
-                   audio_chunks.append(audio_data)
-                   print(f"🔧 Collected chunk (data): {{len(audio_data)}} bytes")
-               else:
-                   print(f"🔧 Chunk type: {{type(chunk)}}, attributes: {{dir(chunk)}}")
+           chunk_count = 0
+           
+           # Try async iteration first
+           try:
+               async for chunk in audio_stream:
+                   chunk_count += 1
+                   print(f"🔧 Processing chunk {chunk_count}: {type(chunk)}")
+                   
+                   if hasattr(chunk, 'frame') and chunk.frame:
+                       audio_data = chunk.frame.data
+                       audio_chunks.append(audio_data)
+                       print(f"🔧 Collected chunk {chunk_count}: {{len(audio_data)}} bytes")
+                   elif hasattr(chunk, 'data'):
+                       audio_data = chunk.data
+                       audio_chunks.append(audio_data)
+                       print(f"🔧 Collected chunk {chunk_count} (data): {{len(audio_data)}} bytes")
+                   else:
+                       print(f"🔧 Chunk {chunk_count} type: {{type(chunk)}}, attributes: {{dir(chunk)}}")
+                       
+                   # Safety check to prevent infinite loops
+                   if chunk_count > 1000:
+                       print("❌ Too many chunks, stopping processing")
+                       break
+                       
+           except TypeError as async_error:
+               print(f"🔧 Async iteration failed, trying sync iteration: {{async_error}}")
+               
+               # Fallback to sync iteration
+               for chunk in audio_stream:
+                   chunk_count += 1
+                   print(f"🔧 Processing chunk {chunk_count}: {type(chunk)}")
+                   
+                   if hasattr(chunk, 'frame') and chunk.frame:
+                       audio_data = chunk.frame.data
+                       audio_chunks.append(audio_data)
+                       print(f"🔧 Collected chunk {chunk_count}: {{len(audio_data)}} bytes")
+                   elif hasattr(chunk, 'data'):
+                       audio_data = chunk.data
+                       audio_chunks.append(audio_data)
+                       print(f"🔧 Collected chunk {chunk_count} (data): {{len(audio_data)}} bytes")
+                   else:
+                       print(f"🔧 Chunk {chunk_count} type: {{type(chunk)}}, attributes: {{dir(chunk)}}")
+                       
+                   # Safety check to prevent infinite loops
+                   if chunk_count > 1000:
+                       print("❌ Too many chunks, stopping processing")
+                       break
+                       
        except Exception as stream_error:
            print(f"❌ Error processing audio stream: {{stream_error}}")
+           import traceback
+           traceback.print_exc()
            return None
        
        if not audio_chunks:
@@ -1048,6 +1120,41 @@ def test_ssml():
             "success": False,
             "error": str(e),
             "test_case": test_case if 'test_case' in locals() else "unknown"
+        }), 500
+
+@app.route('/api/debug/test-simple-tts', methods=['POST'])
+def test_simple_tts():
+    """Debug endpoint to test basic TTS without SSML"""
+    try:
+        # Simple test without SSML
+        simple_text = "Hello, this is a simple test."
+        
+        print(f"🔧 Testing simple TTS with text: {simple_text}")
+        
+        # Test TTS generation without SSML preprocessing
+        audio_content = process_text_with_tts_sync(simple_text)
+        
+        if audio_content:
+            return jsonify({
+                "success": True,
+                "message": "Simple TTS test successful",
+                "text": simple_text,
+                "audio_length": len(audio_content)
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Simple TTS test failed",
+                "text": simple_text
+            })
+    except Exception as e:
+        print(f"❌ Simple TTS test error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "text": simple_text if 'simple_text' in locals() else "unknown"
         }), 500
 
 @app.route('/api/voice/stt', methods=['POST'])
