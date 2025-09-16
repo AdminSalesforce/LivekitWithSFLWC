@@ -1236,23 +1236,22 @@ async def process_text_with_livekit_session_say(text):
             await agent_session.say(text)
             print("✅ LiveKit session.say() completed successfully")
             
-            # For API context, we need to capture the audio that session.say() generates
-            # Since session.say() streams audio to the room, we need to capture it
-            # We'll use the TTS engine to generate the same audio for API response
-            # but only after session.say() has completed
+            # For API response, we need to generate audio data using the TTS engine
+            # The session.say() handles the LiveKit room streaming, but we need audio for API
+            print("🔧 Generating audio data for API response using TTS engine...")
             
             if not tts_engine:
-                print("❌ TTS engine not available for audio capture")
+                print("❌ TTS engine not available for audio generation")
                 return None
             
-            print("🔧 Capturing audio data for API response...")
+            # Use the TTS engine to generate audio data for API response
             audio_stream = tts_engine.synthesize(text=text)
             print(f"🔧 Audio stream created: {audio_stream}")
             
             audio_chunks = []
             chunk_count = 0
             
-            # Simple iteration exactly like working code
+            # Collect audio chunks
             print("🔧 Collecting audio chunks...")
             async for chunk in audio_stream:
                 chunk_count += 1
@@ -1283,7 +1282,7 @@ async def process_text_with_livekit_session_say(text):
                 print("❌ Empty audio data")
                 return None
             
-            # Convert to WAV format exactly like working code
+            # Convert to WAV format
             print("🔧 Creating WAV file...")
             wav_audio = create_wav_file(full_audio_bytes)
             print(f"🔧 WAV file created: {len(wav_audio)} bytes")
