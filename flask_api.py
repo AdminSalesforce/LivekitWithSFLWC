@@ -1216,7 +1216,12 @@ async def process_text_with_livekit_session_say(text):
             
             # Connect to the room (this will start the AgentSession)
             print("🔧 Connecting to room to start AgentSession...")
-            await room.connect(os.environ.get("LIVEKIT_URL"), os.environ.get("LIVEKIT_API_KEY"), os.environ.get("LIVEKIT_API_SECRET"))
+            await room.connect(
+                os.environ.get("LIVEKIT_URL"), 
+                os.environ.get("LIVEKIT_API_KEY"), 
+                os.environ.get("LIVEKIT_API_SECRET"),
+                options=room_options
+            )
             
             # Start the AgentSession with the room
             print("🔧 Starting AgentSession with room...")
