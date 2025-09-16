@@ -1036,7 +1036,7 @@ def process_voice():
         return jsonify({"error": str(e)}), 500
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
-    """Synchronous wrapper for TTS processing using direct LiveKit approach"""
+    """Synchronous wrapper for TTS processing using subprocess approach"""
     try:
         print(f"🔧 Processing TTS for text: {text[:50]}...")
         print(f"Language: {language}, Voice: {voice}")
@@ -1045,53 +1045,137 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
             print("❌ TTS engine not available")
             return None
         
-        # Use threading to run async TTS in a separate thread
-        import threading
-        import queue
-        import asyncio
+        # Use subprocess to avoid event loop issues
+        import subprocess
+        import tempfile
+        import json
         
-        result_queue = queue.Queue()
-        exception_queue = queue.Queue()
+        # Create temporary file with text
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
+            temp_file.write(text)
+            temp_file_path = temp_file.name
         
-        def run_tts_in_thread():
+        try:
+            # Create a simple TTS script
+            tts_script = f"""
+import os
+import sys
+import json
+import base64
+import tempfile
+import asyncio
+from livekit.plugins import google
+
+# Set up Google credentials
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "{os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}"
+
+async def generate_tts():
+    try:
+        # Initialize TTS engine
+        tts_engine = google.TTS()
+        
+        # Read text from file
+        with open('{temp_file_path}', 'r') as f:
+            text = f.read()
+        
+        print(f"Processing text: {{text[:50]}}...")
+        
+        # Generate audio
+        audio_stream = tts_engine.synthesize(text=text)
+        
+        audio_chunks = []
+        try:
+            # Try async iteration first
+            async for chunk in audio_stream:
+                if hasattr(chunk, 'frame') and chunk.frame:
+                    audio_data = chunk.frame.data
+                    audio_chunks.append(audio_data)
+                    print(f"Collected chunk: {{len(audio_data)}} bytes")
+        except:
+            # Fallback to sync iteration
+            for chunk in audio_stream:
+                if hasattr(chunk, 'frame') and chunk.frame:
+                    audio_data = chunk.frame.data
+                    audio_chunks.append(audio_data)
+                    print(f"Collected chunk: {{len(audio_data)}} bytes")
+        
+        if not audio_chunks:
+            print("No audio chunks collected")
+            return None
+        
+        # Combine audio data
+        full_audio_bytes = b"".join(audio_chunks)
+        print(f"Total audio bytes: {{len(full_audio_bytes)}}")
+        
+        # Create WAV file
+        wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
+            b'RIFF', 36 + len(full_audio_bytes), b'WAVE', b'fmt ', 16, 1,
+            1, 24000, 24000 * 1 * 16 // 8, 1 * 16 // 8, 16, b'data', len(full_audio_bytes)
+        )
+        wav_audio = wav_header + full_audio_bytes
+        
+        # Convert to base64
+        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
+        print(f"WAV audio created: {{len(wav_audio)}} bytes")
+        
+        return audio_base64
+        
+    except Exception as e:
+        print(f"Error in TTS: {{e}}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+if __name__ == "__main__":
+    import struct
+    result = asyncio.run(generate_tts())
+    if result:
+        print("SUCCESS:" + result)
+    else:
+        print("FAILED")
+"""
+            
+            # Write script to temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
+                script_file.write(tts_script)
+                script_path = script_file.name
+            
             try:
-                # Create new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+                # Run the script
+                print("🔧 Running TTS subprocess...")
+                result = subprocess.run(
+                    [sys.executable, script_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
                 
-                # Run the async TTS function
-                result = loop.run_until_complete(process_text_with_tts_async(text, language, voice))
-                result_queue.put(result)
+                print(f"🔧 Subprocess return code: {result.returncode}")
+                print(f"🔧 Subprocess stdout: {result.stdout}")
+                print(f"🔧 Subprocess stderr: {result.stderr}")
                 
-            except Exception as e:
-                exception_queue.put(e)
+                if result.returncode == 0 and "SUCCESS:" in result.stdout:
+                    # Extract the base64 audio data
+                    audio_base64 = result.stdout.split("SUCCESS:")[1].strip()
+                    print(f"✅ TTS subprocess completed successfully")
+                    print(f"✅ Audio data length: {len(audio_base64)} characters")
+                    return audio_base64
+                else:
+                    print("❌ TTS subprocess failed")
+                    return None
+                    
             finally:
-                loop.close()
-        
-        # Start the thread
-        tts_thread = threading.Thread(target=run_tts_in_thread)
-        tts_thread.start()
-        
-        # Wait for result with timeout
-        tts_thread.join(timeout=30)
-        
-        if tts_thread.is_alive():
-            print("❌ TTS processing timed out after 30 seconds")
-            return None
-        
-        # Check for exceptions
-        if not exception_queue.empty():
-            exception = exception_queue.get()
-            print(f"❌ TTS processing failed: {exception}")
-            return None
-        
-        # Get result
-        if not result_queue.empty():
-            result = result_queue.get()
-            print(f"✅ TTS processing completed successfully")
-            return result
-        else:
-            print("❌ No result from TTS processing")
+                # Clean up temporary files
+                try:
+                    os.unlink(script_path)
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            print(f"❌ Error in TTS subprocess: {e}")
+            import traceback
+            traceback.print_exc()
             return None
             
     except Exception as e:
