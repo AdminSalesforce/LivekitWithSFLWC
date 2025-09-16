@@ -1114,11 +1114,64 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
         audio_stream = tts_engine.synthesize(text=text)
         
         audio_chunks = []
-        async for chunk in audio_stream:
-            if hasattr(chunk, 'frame') and chunk.frame:
-                audio_data = chunk.frame.data
-                audio_chunks.append(audio_data)
-                print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
+        
+        # Try different approaches to get audio data
+        try:
+            # Method 1: Try async iteration with timeout
+            print("🔧 Trying async iteration with timeout...")
+            
+            async def collect_audio_chunks():
+                async for chunk in audio_stream:
+                    if hasattr(chunk, 'frame') and chunk.frame:
+                        audio_data = chunk.frame.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
+                    elif hasattr(chunk, 'data'):
+                        audio_data = chunk.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
+            
+            # Run with timeout
+            await asyncio.wait_for(collect_audio_chunks(), timeout=25.0)
+            
+        except asyncio.TimeoutError:
+            print("❌ Async iteration timed out after 25 seconds")
+        except Exception as e:
+            print(f"❌ Async iteration failed: {e}")
+            
+            # Method 2: Try synchronous iteration
+            try:
+                print("🔧 Trying synchronous iteration...")
+                for chunk in audio_stream:
+                    if hasattr(chunk, 'frame') and chunk.frame:
+                        audio_data = chunk.frame.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
+                    elif hasattr(chunk, 'data'):
+                        audio_data = chunk.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
+            except Exception as e2:
+                print(f"❌ Synchronous iteration also failed: {e2}")
+                
+                # Method 3: Try to get all data at once
+                try:
+                    print("🔧 Trying to get all data at once...")
+                    if hasattr(audio_stream, '__iter__'):
+                        all_data = list(audio_stream)
+                        print(f"🔧 Got {len(all_data)} items from stream")
+                        for item in all_data:
+                            if hasattr(item, 'frame') and item.frame:
+                                audio_data = item.frame.data
+                                audio_chunks.append(audio_data)
+                                print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
+                            elif hasattr(item, 'data'):
+                                audio_data = item.data
+                                audio_chunks.append(audio_data)
+                                print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
+                except Exception as e3:
+                    print(f"❌ All methods failed: {e3}")
+                    return None
         
         if not audio_chunks:
             print("❌ No audio chunks collected")
