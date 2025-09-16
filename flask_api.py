@@ -1035,6 +1035,37 @@ def process_voice():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def preprocess_text_for_tts(text):
+    """Preprocess text to fix common TTS pronunciation issues"""
+    import re
+    
+    # Replace numbers with words
+    number_words = {
+        '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
+        '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine'
+    }
+    
+    # Replace single digits
+    for digit, word in number_words.items():
+        text = re.sub(r'\b' + digit + r'\b', word, text)
+    
+    # Replace common patterns
+    text = re.sub(r'(\d+)\s*:', r'\1 colon', text)  # "1:" -> "1 colon"
+    text = re.sub(r'(\d+)\s*\.', r'\1 dot', text)  # "1." -> "1 dot"
+    text = re.sub(r'(\d+)\s*\)', r'\1 close parenthesis', text)  # "1)" -> "1 close parenthesis"
+    
+    # Replace case numbers like "000 1111" with "zero zero zero one one one one"
+    text = re.sub(r'(\d)\s*(\d)', r'\1 \2', text)  # Add spaces between digits
+    for digit, word in number_words.items():
+        text = text.replace(digit, word)
+    
+    # Fix common abbreviations
+    text = re.sub(r'\bAPI\b', 'A P I', text)
+    text = re.sub(r'\bURL\b', 'U R L', text)
+    text = re.sub(r'\bID\b', 'I D', text)
+    
+    return text
+
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
     """Synchronous wrapper for TTS processing using subprocess approach"""
     try:
@@ -1045,15 +1076,19 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
             print("❌ TTS engine not available")
             return None
         
+        # Preprocess text to fix TTS pronunciation issues
+        processed_text = preprocess_text_for_tts(text)
+        print(f"🔧 Processed text for TTS: {processed_text[:50]}...")
+        
         # Use subprocess to avoid event loop issues
         import subprocess
         import tempfile
         import json
         import sys
         
-        # Create temporary file with text
+        # Create temporary file with processed text
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
-            temp_file.write(text)
+            temp_file.write(processed_text)
             temp_file_path = temp_file.name
         
         try:
