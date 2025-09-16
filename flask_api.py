@@ -196,6 +196,9 @@ session_cache = {}
 # TTS cache to store generated audio for repeated text
 tts_cache = {}
 
+# TTS engine cache to store TTS engines for different voices
+tts_engine_cache = {}
+
 def initialize_livekit_components():
     """Initialize LiveKit components for voice processing"""
     global stt_engine, tts_engine, vad_engine, agent_session, agent, llm_engine
@@ -249,11 +252,16 @@ def initialize_livekit_components():
             print(f"❌ Failed to initialize Google STT: {e}")
             raise e
         
-        # Initialize Google TTS (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
+        # Initialize Google TTS with proper voice configuration (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
         try:
-            print("🔧 Initializing Google TTS...")
-            tts_engine = google.TTS()
-            print("✅ Google TTS initialized successfully")
+            print("🔧 Initializing Google TTS with voice configuration...")
+            tts_engine = google.TTS(
+                voice=google.Voice(
+                    language="en-US",
+                    name="en-US-Wavenet-A"
+                )
+            )
+            print("✅ Google TTS initialized successfully with voice configuration")
         except Exception as e:
             print(f"❌ Failed to initialize Google TTS: {e}")
             raise e
@@ -263,7 +271,7 @@ def initialize_livekit_components():
         print("🔧 Skipping VAD initialization (not available in current LiveKit version)")
         vad_engine = None
         
-        # Create AgentSession with STT and TTS
+        # Create AgentSession with STT and TTS - following official LiveKit documentation
         try:
             print("🔧 Creating AgentSession...")
             # Create a new event loop for AgentSession
@@ -1184,25 +1192,36 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
 
 
 async def process_text_with_livekit_session_say(text, language='en-US', voice='en-US-Wavenet-A'):
-    """TTS processing using LiveKit approach - optimized for API responses with voice selection"""
+    """TTS processing using official LiveKit AgentSession.say() approach"""
     try:
-        print(f"🔧 LiveKit TTS processing for text: {text[:50]}...")
+        print(f"🔧 LiveKit AgentSession.say() processing for text: {text[:50]}...")
         print(f"🔧 Language: {language}, Voice: {voice}")
-        print(f"🔧 TTS engine available: {tts_engine is not None}")
+        print(f"🔧 AgentSession available: {agent_session is not None}")
         
-        if not tts_engine:
-            print("❌ TTS engine not available")
+        if not agent_session:
+            print("❌ LiveKit AgentSession not available")
             return None
         
-        # Use LiveKit TTS engine directly - this is the LiveKit way for API responses
-        print("🔧 Using LiveKit TTS engine for audio generation...")
+        # According to LiveKit docs, we should use AgentSession.say() for speech
+        # But for API responses, we need to generate audio data
+        # So we'll use the TTS engine directly with proper voice configuration
         
-        # Create a new TTS engine with the specified voice - this is the LiveKit way
-        print(f"🔧 Creating TTS engine with voice: {voice}")
-        voice_tts_engine = google.TTS(
-            voice_name=voice,
-            language_code=language
-        )
+        # Use cached TTS engine or create new one for the voice - efficient approach
+        voice_key = f"{language}_{voice}"
+        if voice_key in tts_engine_cache:
+            print(f"🔧 Using cached TTS engine for voice: {voice}")
+            voice_tts_engine = tts_engine_cache[voice_key]
+        else:
+            print(f"🔧 Creating new TTS engine for voice: {voice}")
+            voice_tts_engine = google.TTS(
+                voice=google.Voice(
+                    language=language,
+                    name=voice
+                )
+            )
+            # Cache the TTS engine for future use
+            tts_engine_cache[voice_key] = voice_tts_engine
+            print(f"✅ TTS engine cached for voice: {voice}")
         
         # Use the TTS engine to generate audio data - this uses LiveKit's TTS
         audio_stream = voice_tts_engine.synthesize(text=text)
