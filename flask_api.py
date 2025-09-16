@@ -46,16 +46,81 @@ SALESFORCE_AGENT_ID = os.environ.get('SALESFORCE_AGENT_ID', '')
 salesforce_token_cache = {}
 salesforce_session_cache = {}
 
+def preprocess_text_for_tts(text):
+    """Preprocess text to improve TTS pronunciation"""
+    if not text:
+        return text
+    
+    # Replace numbers with their spoken equivalents
+    replacements = {
+        '0': 'zero',
+        '1': 'one',
+        '2': 'two',
+        '3': 'three',
+        '4': 'four',
+        '5': 'five',
+        '6': 'six',
+        '7': 'seven',
+        '8': 'eight',
+        '9': 'nine',
+        # Add more replacements as needed
+        '&': 'and',
+        '@': 'at',
+        '#': 'hash',
+        '$': 'dollar',
+        '%': 'percent',
+        '+': 'plus',
+        '=': 'equals',
+        '<': 'less than',
+        '>': 'greater than',
+        '|': 'pipe',
+        '\\': 'backslash',
+        '/': 'slash',
+        '*': 'asterisk',
+        '^': 'caret',
+        '~': 'tilde',
+        '`': 'backtick',
+        '[': 'left bracket',
+        ']': 'right bracket',
+        '{': 'left brace',
+        '}': 'right brace',
+        '(': 'left parenthesis',
+        ')': 'right parenthesis',
+        '!': 'exclamation mark',
+        '?': 'question mark',
+        '.': 'period',
+        ',': 'comma',
+        ';': 'semicolon',
+        ':': 'colon',
+        '"': 'quote',
+        "'": 'apostrophe',
+        '-': 'dash',
+        '_': 'underscore'
+    }
+    
+    processed_text = text
+    for char, replacement in replacements.items():
+        processed_text = processed_text.replace(char, f' {replacement} ')
+    
+    # Clean up multiple spaces
+    processed_text = ' '.join(processed_text.split())
+    
+    print(f"🔧 Text preprocessing: '{text[:50]}...' → '{processed_text[:50]}...'")
+    return processed_text
+
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
     """TTS processing using subprocess to isolate async LiveKit TTS (fixes event loop issue)"""
     try:
         print("🔧 process_text_with_tts_sync FUNCTION CALLED")
-        print(f"🔧 Text: {text[:50]}...")
+        print(f"🔧 Original text: {text[:50]}...")
         print(f"🔧 Language: {language}, Voice: {voice}")
         
-        # Create temporary file with text
+        # Preprocess text to improve TTS pronunciation (fixes "0" → "o" issue)
+        processed_text = preprocess_text_for_tts(text)
+        
+        # Create temporary file with processed text
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
-            temp_file.write(text)
+            temp_file.write(processed_text)
             temp_file_path = temp_file.name
 
         try:
