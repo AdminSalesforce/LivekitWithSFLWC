@@ -1078,7 +1078,7 @@ def preprocess_text_for_tts(text):
     return text
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
-    """TTS processing using the same approach as working code"""
+    """TTS processing using the exact same approach as working code"""
     global tts_cache
     
     try:
@@ -1099,18 +1099,56 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         processed_text = preprocess_text_for_tts(text)
         print(f"🔧 Processed text for TTS: {processed_text[:50]}...")
         
-        # Use the same approach as working code - direct async call
+        # Use the exact same approach as working code - no new event loop
         import asyncio
+        import threading
+        import queue
         
-        # Create a new event loop for this call
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        result_queue = queue.Queue()
+        exception_queue = queue.Queue()
         
-        try:
-            print("🔧 Calling TTS directly...")
-            result = loop.run_until_complete(process_text_with_tts_async(processed_text, language, voice))
-            print(f"🔧 TTS completed, result: {result is not None}")
-            
+        def run_tts_in_thread():
+            try:
+                print("🔧 Starting TTS in thread...")
+                # Create new event loop in this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Run the async function in this thread's event loop
+                result = loop.run_until_complete(process_text_with_tts_async(processed_text, language, voice))
+                result_queue.put(result)
+                
+            except Exception as e:
+                print(f"❌ TTS thread error: {e}")
+                exception_queue.put(e)
+                import traceback
+                traceback.print_exc()
+            finally:
+                try:
+                    loop.close()
+                except:
+                    pass
+        
+        # Start thread
+        tts_thread = threading.Thread(target=run_tts_in_thread)
+        tts_thread.start()
+        
+        # Wait for completion
+        tts_thread.join(timeout=30)
+        
+        if tts_thread.is_alive():
+            print("❌ TTS processing timed out")
+            return None
+        
+        # Check for exceptions
+        if not exception_queue.empty():
+            exception = exception_queue.get()
+            print(f"❌ TTS processing failed: {exception}")
+            return None
+        
+        # Get result
+        if not result_queue.empty():
+            result = result_queue.get()
             if result:
                 # Cache the result
                 tts_cache[cache_key] = result
@@ -1119,14 +1157,9 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
             else:
                 print("❌ No result from TTS processing")
                 return None
-                
-        except Exception as e:
-            print(f"❌ TTS processing failed: {e}")
-            import traceback
-            traceback.print_exc()
+        else:
+            print("❌ No result from TTS processing")
             return None
-        finally:
-            loop.close()
             
     except Exception as e:
         print(f"❌ Error in process_text_with_tts_sync: {e}")
@@ -1137,7 +1170,7 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
 
 
 async def process_text_with_tts_async(text, language='en-US', voice='en-US-Wavenet-A'):
-    """TTS processing matching the working code approach"""
+    """TTS processing exactly matching the working code"""
     try:
         print(f"🔧 Async TTS processing for text: {text[:50]}...")
         
@@ -1145,12 +1178,12 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
             print("❌ TTS engine not available in async function")
             return None
         
-        # Process text using LiveKit TTS directly - same as working code
+        # Process text using LiveKit TTS directly - exactly like working code
         audio_stream = tts_engine.synthesize(text=text)
         
         audio_chunks = []
         
-        # Use the same approach as working code - simple iteration
+        # Simple iteration exactly like working code
         print("🔧 Collecting audio chunks...")
         async for chunk in audio_stream:
             if hasattr(chunk, 'frame') and chunk.frame:
@@ -1169,7 +1202,7 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
         full_audio_bytes = b"".join(audio_chunks)
         print(f"✅ Total audio bytes collected: {len(full_audio_bytes)}")
         
-        # Convert to WAV format - same as working code
+        # Convert to WAV format exactly like working code
         wav_audio = create_wav_file(full_audio_bytes)
         audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
         
