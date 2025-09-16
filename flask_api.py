@@ -45,77 +45,54 @@ salesforce_token_cache = {}
 salesforce_session_cache = {}
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
-    """TTS processing using LiveKit directly (matching working code)"""
+    """TTS processing using the exact same approach as working code"""
     try:
         print("🔧 process_text_with_tts_sync FUNCTION CALLED")
         print(f"🔧 Text: {text[:50]}...")
         print(f"🔧 Language: {language}, Voice: {voice}")
         
-        # Use the global TTS engine (initialized in initialize_livekit_components)
+        # Use the exact same approach as your working code
+        # Your working code: tts = google.TTS() then await session.say(response)
+        # For API, we need to collect the audio data from the same TTS engine
+        
         if not tts_engine:
             print("❌ TTS engine not available")
             return None
         
-        print("🔧 Using LiveKit TTS engine directly...")
+        print("🔧 Using LiveKit TTS engine (exact same as working code)...")
         
-        # Generate audio using LiveKit TTS (matching working code)
+        # This is the exact same TTS engine as your working code
+        # Your working code: tts = google.TTS()
+        # We already have: tts_engine = google.TTS() in initialize_livekit_components
+        
+        # Generate audio using the same method as your working code
+        # Your working code uses session.say() which internally calls tts.synthesize()
         audio_stream = tts_engine.synthesize(text=text)
         
+        print("🔧 Collecting audio data from LiveKit TTS stream...")
+        
+        # Collect audio data from the stream (same as what session.say() does internally)
         audio_chunks = []
         
-        # Collect audio chunks (matching working code approach)
-        try:
-            # Try async iteration first
-            async def collect_audio():
-                try:
-                    async for chunk in audio_stream:
-                        if hasattr(chunk, 'frame') and chunk.frame:
-                            audio_data = chunk.frame.data
-                            audio_chunks.append(audio_data)
-                            print(f"🔧 Collected chunk: {len(audio_data)} bytes")
-                except TypeError:
-                    # audio_stream might not be async iterable
-                    print("🔧 Audio stream is not async iterable, trying sync approach...")
-                    # Try to convert to list and iterate
-                    try:
-                        all_chunks = list(audio_stream)
-                        for chunk in all_chunks:
-                            if hasattr(chunk, 'frame') and chunk.frame:
-                                audio_data = chunk.frame.data
-                                audio_chunks.append(audio_data)
-                                print(f"🔧 Collected chunk: {len(audio_data)} bytes")
-                    except Exception as e3:
-                        print(f"❌ List conversion failed: {e3}")
-                        raise
-            
-            # Run async collection
-            asyncio.run(collect_audio())
-            
-        except Exception as e:
-            print(f"🔧 Async iteration failed: {e}, trying sync iteration...")
-            try:
-                # Fallback to sync iteration
-                for chunk in audio_stream:
-                    if hasattr(chunk, 'frame') and chunk.frame:
-                        audio_data = chunk.frame.data
-                        audio_chunks.append(audio_data)
-                        print(f"🔧 Collected chunk: {len(audio_data)} bytes")
-            except Exception as e2:
-                print(f"❌ Sync iteration also failed: {e2}")
-                return None
+        # Process the audio stream exactly like your working code does
+        for chunk in audio_stream:
+            if hasattr(chunk, 'frame') and chunk.frame:
+                audio_data = chunk.frame.data
+                audio_chunks.append(audio_data)
+                print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
         
         if not audio_chunks:
-            print("❌ No audio chunks collected")
+            print("❌ No audio chunks collected from LiveKit TTS")
             return None
         
-        # Combine audio data
+        # Combine all audio data
         full_audio_bytes = b"".join(audio_chunks)
-        print(f"✅ Total audio bytes: {len(full_audio_bytes)}")
+        print(f"✅ Total audio bytes from LiveKit TTS: {len(full_audio_bytes)}")
         
-        # Create WAV file (matching working code structure)
+        # Create WAV file (same format as your working code expects)
         wav_audio = create_wav_file(full_audio_bytes)
         
-        # Convert to base64
+        # Convert to base64 for API response
         audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
         print(f"✅ WAV audio created: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
         
