@@ -993,27 +993,44 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         exception_queue = queue.Queue()
         
         def run_tts_in_thread():
+            loop = None
             try:
                 # Create a completely new event loop for this thread
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
-                try:
-                    # Run the async TTS function
-                    result = loop.run_until_complete(process_text_with_tts_async(text, language, voice))
-                    result_queue.put(result)
-                finally:
-                    # Always close the loop when done
-                    loop.close()
-                    
+                # Run the async TTS function
+                result = loop.run_until_complete(process_text_with_tts_async(text, language, voice))
+                result_queue.put(result)
+                
             except Exception as e:
                 print(f"❌ Exception in TTS thread: {e}")
                 exception_queue.put(e)
+            finally:
+                # Only close the loop if it was created successfully
+                if loop and not loop.is_closed():
+                    try:
+                        # Cancel any remaining tasks
+                        pending = asyncio.all_tasks(loop)
+                        for task in pending:
+                            task.cancel()
+                        # Wait for tasks to be cancelled
+                        if pending:
+                            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                        # Close the loop
+                        loop.close()
+                    except Exception as close_error:
+                        print(f"❌ Error closing loop: {close_error}")
         
         # Start the TTS processing in a separate thread
         tts_thread = threading.Thread(target=run_tts_in_thread)
         tts_thread.start()
-        tts_thread.join()  # Wait for the thread to complete
+        tts_thread.join(timeout=30)  # Wait for the thread to complete with 30 second timeout
+        
+        # Check if thread is still alive (timed out)
+        if tts_thread.is_alive():
+            print("❌ TTS processing timed out after 30 seconds")
+            return None
         
         # Check for exceptions
         if not exception_queue.empty():
@@ -1052,15 +1069,21 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
         
         print("🔧 TTS synthesis started...")
         audio_chunks = []
-        async for chunk in audio_stream:
-            # Access audio data from the frame attribute
-            if hasattr(chunk, 'frame') and chunk.frame:
-                # Get the raw audio data from the AudioFrame
-                audio_data = chunk.frame.data
-                audio_chunks.append(audio_data)
-                print(f"🔧 Received audio chunk: {len(audio_data)} bytes")
-            else:
-                print(f"🔧 No audio data in chunk: {chunk}")
+        
+        # Add timeout to prevent hanging
+        try:
+            async for chunk in asyncio.wait_for(audio_stream.__aiter__(), timeout=25.0):
+                # Access audio data from the frame attribute
+                if hasattr(chunk, 'frame') and chunk.frame:
+                    # Get the raw audio data from the AudioFrame
+                    audio_data = chunk.frame.data
+                    audio_chunks.append(audio_data)
+                    print(f"🔧 Received audio chunk: {len(audio_data)} bytes")
+                else:
+                    print(f"🔧 No audio data in chunk: {chunk}")
+        except asyncio.TimeoutError:
+            print("❌ TTS synthesis timed out after 25 seconds")
+            return None
         
         if not audio_chunks:
             print("❌ No audio chunks received")
