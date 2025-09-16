@@ -219,14 +219,14 @@ async def generate_tts():
        
        # Process audio stream
        print("🔧 Processing audio stream...")
+       chunk_count = 0
+       
        try:
-           chunk_count = 0
-           
            # Try async iteration first
            try:
                async for chunk in audio_stream:
                    chunk_count += 1
-                   print(f"🔧 Processing chunk {chunk_count}: {type(chunk)}")
+                   print(f"🔧 Processing chunk {chunk_count}: {{type(chunk)}}")
                    
                    if hasattr(chunk, 'frame') and chunk.frame:
                        audio_data = chunk.frame.data
@@ -250,7 +250,7 @@ async def generate_tts():
                # Fallback to sync iteration
                for chunk in audio_stream:
                    chunk_count += 1
-                   print(f"🔧 Processing chunk {chunk_count}: {type(chunk)}")
+                   print(f"🔧 Processing chunk {chunk_count}: {{type(chunk)}}")
                    
                    if hasattr(chunk, 'frame') and chunk.frame:
                        audio_data = chunk.frame.data
