@@ -201,6 +201,8 @@ def initialize_livekit_components():
     global stt_engine, tts_engine, vad_engine, agent_session, agent, llm_engine
     
     print("🚀 Starting LiveKit components initialization...")
+    print(f"🔧 Current tts_engine: {tts_engine is not None}")
+    print(f"🔧 Current agent_session: {agent_session is not None}")
     
     try:
         # Check if Google credentials are properly set
@@ -1433,6 +1435,9 @@ def text_to_speech():
             print("❌ Error: Text is required")
             return jsonify({"error": "Text is required"}), 400
         
+        print(f"🔧 TTS engine check: {tts_engine is not None}")
+        print(f"🔧 AgentSession check: {agent_session is not None}")
+        
         # Initialize LiveKit components if not already done
         if not tts_engine:
             print("🔧 Initializing LiveKit components for TTS...")
@@ -1446,7 +1451,9 @@ def text_to_speech():
         print(f"🔧 TTS engine available: {tts_engine is not None}")
         
         # Process text with TTS using synchronous wrapper
+        print("🔧 About to call process_text_with_tts_sync...")
         audio_content = process_text_with_tts_sync(text, language, voice)
+        print(f"🔧 process_text_with_tts_sync returned: {type(audio_content)}")
         
         print(f"✅ TTS generated, audio length: {len(audio_content) if audio_content else 'null'}")
         
