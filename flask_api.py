@@ -47,12 +47,14 @@ salesforce_token_cache = {}
 salesforce_session_cache = {}
 
 def preprocess_text_for_tts(text):
-    """Preprocess text to make TTS sound more natural and human-like"""
+    """Preprocess text to make TTS sound more natural and human-like using SSML"""
     if not text:
         return text
     
-    # Make text more conversational and natural
-    processed_text = text
+    import re
+    
+    # Start with SSML wrapper
+    processed_text = f"<speak>{text}</speak>"
     
     # Add natural pauses and emphasis for better flow
     processed_text = processed_text.replace('.', '. ')  # Pause after periods
@@ -60,27 +62,29 @@ def preprocess_text_for_tts(text):
     processed_text = processed_text.replace('?', '? ')  # Pause after questions
     processed_text = processed_text.replace(',', ', ')  # Pause after commas
     
-    # Replace numbers with their spoken equivalents (but keep some context)
-    number_replacements = {
-        '0': 'zero',
-        '1': 'one',
-        '2': 'two',
-        '3': 'three',
-        '4': 'four',
-        '5': 'five',
-        '6': 'six',
-        '7': 'seven',
-        '8': 'eight',
-        '9': 'nine'
-    }
+    # Use SSML for better number pronunciation
+    # Replace standalone numbers with SSML say-as cardinal
+    processed_text = re.sub(r'\b(\d+)\b', r'<say-as interpret-as="cardinal">\1</say-as>', processed_text)
     
-    # Only replace standalone numbers, not in words
-    import re
-    for digit, word in number_replacements.items():
-        # Replace digits that are not part of words
-        processed_text = re.sub(r'\b' + digit + r'\b', word, processed_text)
+    # Handle case numbers and IDs (like "0001111") - use characters for better pronunciation
+    processed_text = re.sub(r'\b(\d{4,})\b', r'<say-as interpret-as="characters">\1</say-as>', processed_text)
     
-    # Add natural speech patterns
+    # Handle currency amounts
+    processed_text = re.sub(r'\$(\d+(?:\.\d{2})?)', r'<say-as interpret-as="currency" currency="USD">$\1</say-as>', processed_text)
+    
+    # Handle dates (MM/DD/YYYY or DD/MM/YYYY format)
+    processed_text = re.sub(r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', r'<say-as interpret-as="date" format="mdy">\1/\2/\3</say-as>', processed_text)
+    
+    # Handle time (HH:MM format)
+    processed_text = re.sub(r'\b(\d{1,2}):(\d{2})\b', r'<say-as interpret-as="time" format="hms12">\1:\2</say-as>', processed_text)
+    
+    # Handle percentages
+    processed_text = re.sub(r'(\d+(?:\.\d+)?)%', r'<say-as interpret-as="number">\1</say-as> percent', processed_text)
+    
+    # Handle phone numbers (XXX-XXX-XXXX format)
+    processed_text = re.sub(r'\b(\d{3})-(\d{3})-(\d{4})\b', r'<say-as interpret-as="telephone">\1-\2-\3</say-as>', processed_text)
+    
+    # Add natural speech patterns with SSML
     processed_text = processed_text.replace('I am', "I'm")
     processed_text = processed_text.replace('I will', "I'll")
     processed_text = processed_text.replace('I have', "I've")
@@ -95,18 +99,23 @@ def preprocess_text_for_tts(text):
     processed_text = processed_text.replace('would not', "wouldn't")
     processed_text = processed_text.replace('could not', "couldn't")
     
-    # Add natural emphasis for important words
-    emphasis_words = ['important', 'urgent', 'critical', 'error', 'success', 'warning', 'note']
+    # Add natural emphasis for important words using SSML
+    emphasis_words = ['important', 'urgent', 'critical', 'error', 'success', 'warning', 'note', 'failed', 'completed', 'pending']
     for word in emphasis_words:
         if word in processed_text.lower():
-            processed_text = processed_text.replace(word, f"<emphasis level='strong'>{word}</emphasis>")
-            processed_text = processed_text.replace(word.title(), f"<emphasis level='strong'>{word.title()}</emphasis>")
-            processed_text = processed_text.replace(word.upper(), f"<emphasis level='strong'>{word.upper()}</emphasis>")
+            # Use SSML emphasis tag
+            processed_text = re.sub(rf'\b{word}\b', f'<emphasis level="strong">{word}</emphasis>', processed_text, flags=re.IGNORECASE)
     
-    # Clean up multiple spaces
+    # Add breaks for better pacing
+    processed_text = processed_text.replace('. ', '<break time="500ms"/>')
+    processed_text = processed_text.replace('! ', '<break time="500ms"/>')
+    processed_text = processed_text.replace('? ', '<break time="500ms"/>')
+    processed_text = processed_text.replace(', ', '<break time="250ms"/>')
+    
+    # Clean up multiple spaces and ensure proper SSML structure
     processed_text = ' '.join(processed_text.split())
     
-    print(f"🔧 Text preprocessing for natural speech: '{text[:50]}...' → '{processed_text[:50]}...'")
+    print(f"🔧 Text preprocessing with SSML: '{text[:50]}...' → '{processed_text[:100]}...'")
     return processed_text
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
@@ -158,9 +167,19 @@ async def generate_tts():
            print("❌ Empty text provided")
            return None
        
-       # Generate audio using LiveKit TTS synthesize method
-       print("🔧 Calling tts_engine.synthesize()...")
-       audio_stream = tts_engine.synthesize(text=text)
+       # Generate audio using LiveKit TTS synthesize method with SSML
+       print("🔧 Calling tts_engine.synthesize() with SSML...")
+       print(f"🔧 SSML input: {text[:200]}...")
+       
+       # Check if text contains SSML tags
+       if '<speak>' in text and '</speak>' in text:
+           print("🔧 Detected SSML input, using SSML synthesis")
+           # Use SSML synthesis for better pronunciation
+           audio_stream = tts_engine.synthesize(ssml=text)
+       else:
+           print("🔧 Plain text input, using regular synthesis")
+           audio_stream = tts_engine.synthesize(text=text)
+       
        print("✅ Audio stream created")
        
        audio_chunks = []
@@ -975,6 +994,60 @@ def test_tts():
             "success": False,
             "error": str(e),
             "text": test_text if 'test_text' in locals() else "unknown"
+        }), 500
+
+@app.route('/api/debug/test-ssml', methods=['POST'])
+def test_ssml():
+    """Debug endpoint to test SSML functionality with numbers, dates, and currencies"""
+    try:
+        # Test cases for SSML improvements
+        test_cases = {
+            "case_number": "The case with number 0001111 was not found.",
+            "currency": "The total amount is $1,234.56.",
+            "date": "The case was created on 09/16/2025.",
+            "time": "The meeting is scheduled for 2:30 PM.",
+            "percentage": "The success rate is 95.5%.",
+            "phone": "Please call us at 555-123-4567.",
+            "mixed": "Case 0001111 for $500.00 on 09/16/2025 at 2:30 PM has a 95% success rate. Call 555-123-4567."
+        }
+        
+        test_case = request.get_json().get('test_case', 'case_number')
+        test_text = test_cases.get(test_case, test_cases['case_number'])
+        
+        print(f"🔧 Testing SSML with case: {test_case}")
+        print(f"🔧 Original text: {test_text}")
+        
+        # Show the SSML preprocessing
+        processed_text = preprocess_text_for_tts(test_text)
+        print(f"🔧 SSML processed: {processed_text}")
+        
+        # Test TTS generation
+        audio_content = process_text_with_tts_sync(test_text)
+        
+        if audio_content:
+            return jsonify({
+                "success": True,
+                "message": "SSML TTS test successful",
+                "test_case": test_case,
+                "original_text": test_text,
+                "ssml_processed": processed_text,
+                "audio_length": len(audio_content),
+                "available_test_cases": list(test_cases.keys())
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "SSML TTS test failed",
+                "test_case": test_case,
+                "original_text": test_text,
+                "ssml_processed": processed_text
+            })
+    except Exception as e:
+        print(f"❌ SSML test error: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "test_case": test_case if 'test_case' in locals() else "unknown"
         }), 500
 
 @app.route('/api/voice/stt', methods=['POST'])
