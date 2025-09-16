@@ -1104,6 +1104,7 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         import json
         import tempfile
         import os
+        import sys
         
         # Create a temporary script for TTS processing
         tts_script = f"""
