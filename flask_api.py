@@ -13,6 +13,9 @@ import tempfile
 import logging
 import time
 import base64
+import struct
+import queue
+import threading
 from flask_cors import CORS
 
 # Initialize logging first
@@ -983,19 +986,48 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         # Create a new event loop for this TTS operation
         import asyncio
         import threading
+        import queue
+        
+        # Use a queue to pass the result back from the thread
+        result_queue = queue.Queue()
+        exception_queue = queue.Queue()
         
         def run_tts_in_thread():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             try:
-                return loop.run_until_complete(process_text_with_tts_async(text, language, voice))
-            finally:
-                loop.close()
+                # Create a completely new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    # Run the async TTS function
+                    result = loop.run_until_complete(process_text_with_tts_async(text, language, voice))
+                    result_queue.put(result)
+                finally:
+                    # Always close the loop when done
+                    loop.close()
+                    
+            except Exception as e:
+                print(f"❌ Exception in TTS thread: {e}")
+                exception_queue.put(e)
         
-        # Run TTS in a separate thread with its own event loop
-        result = run_tts_in_thread()
-        return result
+        # Start the TTS processing in a separate thread
+        tts_thread = threading.Thread(target=run_tts_in_thread)
+        tts_thread.start()
+        tts_thread.join()  # Wait for the thread to complete
         
+        # Check for exceptions
+        if not exception_queue.empty():
+            raise exception_queue.get()
+        
+        # Get the result
+        if not result_queue.empty():
+            result = result_queue.get()
+            print(f"✅ TTS processing completed successfully")
+            return result
+        else:
+            print("❌ No result from TTS processing")
+            return None
+            
     except Exception as e:
         print(f"❌ Error in process_text_with_tts_sync: {e}")
         logger.error(f"Error in process_text_with_tts_sync: {e}")
