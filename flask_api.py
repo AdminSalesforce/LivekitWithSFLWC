@@ -180,6 +180,7 @@ import json
 import base64
 import tempfile
 import asyncio
+import struct
 from livekit.plugins import google
 
 # Set up Google credentials (same as your working code)
@@ -195,11 +196,11 @@ async def generate_tts():
        print("✅ TTS engine initialized")
        
        # Read text from file
-       print(f"🔧 Reading text from file: {temp_file_path}")
+       print("🔧 Reading text from file: {temp_file_path}")
        with open('{temp_file_path}', 'r', encoding='utf-8') as f:
            text = f.read()
        
-       print(f"🔧 Processing text: {{text[:50]}}...")
+       print("🔧 Processing text: " + text[:50] + "...")
        
        if not text.strip():
            print("❌ Empty text provided")
@@ -207,37 +208,36 @@ async def generate_tts():
        
        # Generate audio using LiveKit TTS synthesize method
        print("🔧 Calling tts_engine.synthesize()...")
-       print(f"🔧 Input text: {text[:200]}...")
+       print("🔧 Input text: " + text[:200] + "...")
        
        # LiveKit TTS handles SSML automatically when text contains SSML tags
-       # No need to specify ssml parameter separately
        audio_stream = tts_engine.synthesize(text=text)
        
        print("✅ Audio stream created")
        
        audio_chunks = []
+       chunk_count = 0
        
        # Process audio stream
        print("🔧 Processing audio stream...")
-       chunk_count = 0
        
        try:
            # Try async iteration first
            try:
                async for chunk in audio_stream:
                    chunk_count += 1
-                   print(f"🔧 Processing chunk {chunk_count}: {{type(chunk)}}")
+                   print("🔧 Processing chunk " + str(chunk_count) + ": " + str(type(chunk)))
                    
                    if hasattr(chunk, 'frame') and chunk.frame:
                        audio_data = chunk.frame.data
                        audio_chunks.append(audio_data)
-                       print(f"🔧 Collected chunk {chunk_count}: {{len(audio_data)}} bytes")
+                       print("🔧 Collected chunk " + str(chunk_count) + ": " + str(len(audio_data)) + " bytes")
                    elif hasattr(chunk, 'data'):
                        audio_data = chunk.data
                        audio_chunks.append(audio_data)
-                       print(f"🔧 Collected chunk {chunk_count} (data): {{len(audio_data)}} bytes")
+                       print("🔧 Collected chunk " + str(chunk_count) + " (data): " + str(len(audio_data)) + " bytes")
                    else:
-                       print(f"🔧 Chunk {chunk_count} type: {{type(chunk)}}, attributes: {{dir(chunk)}}")
+                       print("🔧 Chunk " + str(chunk_count) + " type: " + str(type(chunk)) + ", attributes: " + str(dir(chunk)))
                        
                    # Safety check to prevent infinite loops
                    if chunk_count > 1000:
@@ -245,23 +245,23 @@ async def generate_tts():
                        break
                        
            except TypeError as async_error:
-               print(f"🔧 Async iteration failed, trying sync iteration: {{async_error}}")
+               print("🔧 Async iteration failed, trying sync iteration: " + str(async_error))
                
                # Fallback to sync iteration
                for chunk in audio_stream:
                    chunk_count += 1
-                   print(f"🔧 Processing chunk {chunk_count}: {{type(chunk)}}")
+                   print("🔧 Processing chunk " + str(chunk_count) + ": " + str(type(chunk)))
                    
                    if hasattr(chunk, 'frame') and chunk.frame:
                        audio_data = chunk.frame.data
                        audio_chunks.append(audio_data)
-                       print(f"🔧 Collected chunk {chunk_count}: {{len(audio_data)}} bytes")
+                       print("🔧 Collected chunk " + str(chunk_count) + ": " + str(len(audio_data)) + " bytes")
                    elif hasattr(chunk, 'data'):
                        audio_data = chunk.data
                        audio_chunks.append(audio_data)
-                       print(f"🔧 Collected chunk {chunk_count} (data): {{len(audio_data)}} bytes")
+                       print("🔧 Collected chunk " + str(chunk_count) + " (data): " + str(len(audio_data)) + " bytes")
                    else:
-                       print(f"🔧 Chunk {chunk_count} type: {{type(chunk)}}, attributes: {{dir(chunk)}}")
+                       print("🔧 Chunk " + str(chunk_count) + " type: " + str(type(chunk)) + ", attributes: " + str(dir(chunk)))
                        
                    # Safety check to prevent infinite loops
                    if chunk_count > 1000:
@@ -269,7 +269,7 @@ async def generate_tts():
                        break
                        
        except Exception as stream_error:
-           print(f"❌ Error processing audio stream: {{stream_error}}")
+           print("❌ Error processing audio stream: " + str(stream_error))
            import traceback
            traceback.print_exc()
            return None
@@ -280,7 +280,7 @@ async def generate_tts():
        
        # Combine audio data
        full_audio_bytes = b"".join(audio_chunks)
-       print(f"✅ Total audio bytes: {{len(full_audio_bytes)}}")
+       print("✅ Total audio bytes: " + str(len(full_audio_bytes)))
        
        if len(full_audio_bytes) == 0:
            print("❌ Empty audio data")
@@ -296,18 +296,17 @@ async def generate_tts():
        
        # Convert to base64
        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
-       print(f"✅ WAV audio created: {{len(wav_audio)}} bytes, Base64: {{len(audio_base64)}} chars")
+       print("✅ WAV audio created: " + str(len(wav_audio)) + " bytes, Base64: " + str(len(audio_base64)) + " chars")
        
        return audio_base64
        
    except Exception as e:
-       print(f"❌ Error in TTS generation: {{e}}")
+       print("❌ Error in TTS generation: " + str(e))
        import traceback
        traceback.print_exc()
        return None
 
 if __name__ == "__main__":
-   import struct
    result = asyncio.run(generate_tts())
    if result:
        print("SUCCESS:" + result)
