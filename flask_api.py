@@ -1072,15 +1072,21 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
         
         # Add timeout to prevent hanging
         try:
-            async for chunk in asyncio.wait_for(audio_stream.__aiter__(), timeout=25.0):
-                # Access audio data from the frame attribute
-                if hasattr(chunk, 'frame') and chunk.frame:
-                    # Get the raw audio data from the AudioFrame
-                    audio_data = chunk.frame.data
-                    audio_chunks.append(audio_data)
-                    print(f"🔧 Received audio chunk: {len(audio_data)} bytes")
-                else:
-                    print(f"🔧 No audio data in chunk: {chunk}")
+            # Use asyncio.wait_for to wrap the entire async iteration
+            async def process_audio_stream():
+                async for chunk in audio_stream:
+                    # Access audio data from the frame attribute
+                    if hasattr(chunk, 'frame') and chunk.frame:
+                        # Get the raw audio data from the AudioFrame
+                        audio_data = chunk.frame.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Received audio chunk: {len(audio_data)} bytes")
+                    else:
+                        print(f"🔧 No audio data in chunk: {chunk}")
+            
+            # Wait for the audio processing with timeout
+            await asyncio.wait_for(process_audio_stream(), timeout=25.0)
+            
         except asyncio.TimeoutError:
             print("❌ TTS synthesis timed out after 25 seconds")
             return None
