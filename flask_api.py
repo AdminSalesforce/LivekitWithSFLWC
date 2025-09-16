@@ -1078,7 +1078,7 @@ def preprocess_text_for_tts(text):
     return text
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
-    """Fast TTS processing with caching"""
+    """Reliable TTS processing with caching"""
     global tts_cache
     
     try:
@@ -1099,7 +1099,7 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         processed_text = preprocess_text_for_tts(text)
         print(f"🔧 Processed text for TTS: {processed_text[:50]}...")
         
-        # Use threading for faster processing
+        # Use simple threading approach
         import threading
         import queue
         import asyncio
@@ -1107,18 +1107,21 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         result_queue = queue.Queue()
         exception_queue = queue.Queue()
         
-        def run_tts_fast():
+        def run_tts_simple():
             try:
                 # Create new event loop for this thread
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
-                # Run the async TTS function
-                result = loop.run_until_complete(process_text_with_tts_async_fast(processed_text, language, voice))
+                # Use the original working async function
+                result = loop.run_until_complete(process_text_with_tts_async(processed_text, language, voice))
                 result_queue.put(result)
                 
             except Exception as e:
                 exception_queue.put(e)
+                print(f"❌ TTS thread error: {e}")
+                import traceback
+                traceback.print_exc()
             finally:
                 try:
                     loop.close()
@@ -1126,14 +1129,14 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
                     pass
         
         # Start the thread
-        tts_thread = threading.Thread(target=run_tts_fast)
+        tts_thread = threading.Thread(target=run_tts_simple)
         tts_thread.start()
         
-        # Wait for result with shorter timeout
-        tts_thread.join(timeout=15)
+        # Wait for result with timeout
+        tts_thread.join(timeout=20)
         
         if tts_thread.is_alive():
-            print("❌ TTS processing timed out after 15 seconds")
+            print("❌ TTS processing timed out after 20 seconds")
             return None
         
         # Check for exceptions
