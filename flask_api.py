@@ -1,7 +1,9 @@
 import os
+import sys
 import json
 import base64
 import tempfile
+import subprocess
 import asyncio
 import logging
 import requests
@@ -45,59 +47,136 @@ salesforce_token_cache = {}
 salesforce_session_cache = {}
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
-    """TTS processing using the exact same approach as working code"""
+    """TTS processing using subprocess to isolate async LiveKit TTS (fixes event loop issue)"""
     try:
         print("🔧 process_text_with_tts_sync FUNCTION CALLED")
         print(f"🔧 Text: {text[:50]}...")
         print(f"🔧 Language: {language}, Voice: {voice}")
         
-        # Use the exact same approach as your working code
-        # Your working code: tts = google.TTS() then await session.say(response)
-        # For API, we need to collect the audio data from the same TTS engine
-        
-        if not tts_engine:
-            print("❌ TTS engine not available")
+        # Create temporary file with text
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
+            temp_file.write(text)
+            temp_file_path = temp_file.name
+
+        try:
+            # Create TTS script that uses the same approach as your working code
+            tts_script = f"""
+import os
+import sys
+import json
+import base64
+import tempfile
+import asyncio
+from livekit.plugins import google
+
+# Set up Google credentials (same as your working code)
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "{os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}"
+
+async def generate_tts():
+   try:
+       # Initialize TTS engine (exact same as your working code)
+       tts_engine = google.TTS()
+       
+       # Read text from file
+       with open('{temp_file_path}', 'r') as f:
+           text = f.read()
+       
+       print(f"Processing text: {{text[:50]}}...")
+       
+       # Generate audio using the same method as your working code
+       # Your working code: tts = google.TTS() then await session.say(response)
+       # This is the same tts.synthesize() that session.say() uses internally
+       audio_stream = tts_engine.synthesize(text=text)
+       
+       audio_chunks = []
+       
+       # Process audio stream (same as your working code's approach)
+       async for chunk in audio_stream:
+           if hasattr(chunk, 'frame') and chunk.frame:
+               audio_data = chunk.frame.data
+               audio_chunks.append(audio_data)
+               print(f"Collected chunk: {{len(audio_data)}} bytes")
+       
+       if not audio_chunks:
+           print("No audio chunks collected")
+           return None
+       
+       # Combine audio data
+       full_audio_bytes = b"".join(audio_chunks)
+       print(f"Total audio bytes: {{len(full_audio_bytes)}}")
+       
+       # Create WAV file (same format as your working code)
+       wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
+           b'RIFF', 36 + len(full_audio_bytes), b'WAVE', b'fmt ', 16, 1,
+           1, 24000, 24000 * 1 * 16 // 8, 1 * 16 // 8, 16, b'data', len(full_audio_bytes)
+       )
+       wav_audio = wav_header + full_audio_bytes
+       
+       # Convert to base64
+       audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
+       print(f"WAV audio created: {{len(wav_audio)}} bytes")
+       
+       return audio_base64
+       
+   except Exception as e:
+       print(f"Error in TTS: {{e}}")
+       import traceback
+       traceback.print_exc()
+       return None
+
+if __name__ == "__main__":
+   import struct
+   result = asyncio.run(generate_tts())
+   if result:
+       print("SUCCESS:" + result)
+   else:
+       print("FAILED")
+"""
+
+            # Write script to temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
+                script_file.write(tts_script)
+                script_path = script_file.name
+
+            try:
+                # Run the script in subprocess (isolates async event loop)
+                print("🔧 Running TTS subprocess with LiveKit TTS...")
+                result = subprocess.run(
+                    [sys.executable, script_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False
+                )
+
+                print(f"🔧 Subprocess return code: {result.returncode}")
+                print(f"🔧 Subprocess stdout: {result.stdout}")
+                print(f"🔧 Subprocess stderr: {result.stderr}")
+
+                if result.returncode == 0 and "SUCCESS:" in result.stdout:
+                    # Extract the base64 audio data
+                    audio_base64 = result.stdout.split("SUCCESS:")[1].strip()
+                    print("✅ TTS subprocess completed successfully")
+                    print(f"✅ Audio data length: {len(audio_base64)} characters")
+                    return audio_base64
+                else:
+                    print("❌ TTS subprocess failed")
+                    return None
+
+            finally:
+                # Clean up temporary files
+                try:
+                    os.unlink(script_path)
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+
+        except Exception as e:
+            print(f"❌ Error in TTS subprocess: {e}")
+            import traceback
+            traceback.print_exc()
             return None
-        
-        print("🔧 Using LiveKit TTS engine (exact same as working code)...")
-        
-        # This is the exact same TTS engine as your working code
-        # Your working code: tts = google.TTS()
-        # We already have: tts_engine = google.TTS() in initialize_livekit_components
-        
-        # Generate audio using the same method as your working code
-        # Your working code uses session.say() which internally calls tts.synthesize()
-        audio_stream = tts_engine.synthesize(text=text)
-        
-        print("🔧 Collecting audio data from LiveKit TTS stream...")
-        
-        # Collect audio data from the stream (same as what session.say() does internally)
-        audio_chunks = []
-        
-        # Process the audio stream exactly like your working code does
-        for chunk in audio_stream:
-            if hasattr(chunk, 'frame') and chunk.frame:
-                audio_data = chunk.frame.data
-                audio_chunks.append(audio_data)
-                print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
-        
-        if not audio_chunks:
-            print("❌ No audio chunks collected from LiveKit TTS")
-            return None
-        
-        # Combine all audio data
-        full_audio_bytes = b"".join(audio_chunks)
-        print(f"✅ Total audio bytes from LiveKit TTS: {len(full_audio_bytes)}")
-        
-        # Create WAV file (same format as your working code expects)
-        wav_audio = create_wav_file(full_audio_bytes)
-        
-        # Convert to base64 for API response
-        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
-        print(f"✅ WAV audio created: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
-        
-        return audio_base64
-        
+
     except Exception as e:
         print(f"❌ Error in process_text_with_tts_sync: {e}")
         logger.error("Error in process_text_with_tts_sync: %s", e)
