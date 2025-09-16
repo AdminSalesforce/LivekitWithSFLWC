@@ -249,17 +249,11 @@ def initialize_livekit_components():
             print(f"❌ Failed to initialize Google STT: {e}")
             raise e
         
-        # Initialize Google TTS with voice configuration (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
+        # Initialize Google TTS (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
         try:
-            print("🔧 Initializing Google TTS with voice configuration...")
-            tts_engine = google.TTS(
-                voice=google.TTSVoice(
-                    language="en-US",
-                    name="en-US-Wavenet-A",  # Default voice, can be changed
-                    gender=google.Gender.FEMALE
-                )
-            )
-            print("✅ Google TTS initialized successfully with voice configuration")
+            print("🔧 Initializing Google TTS...")
+            tts_engine = google.TTS()
+            print("✅ Google TTS initialized successfully")
         except Exception as e:
             print(f"❌ Failed to initialize Google TTS: {e}")
             raise e
@@ -1206,11 +1200,8 @@ async def process_text_with_livekit_session_say(text, language='en-US', voice='e
         # Create a new TTS engine with the specified voice - this is the LiveKit way
         print(f"🔧 Creating TTS engine with voice: {voice}")
         voice_tts_engine = google.TTS(
-            voice=google.TTSVoice(
-                language=language,
-                name=voice,
-                gender=google.Gender.FEMALE if 'Female' in voice or 'Wavenet-A' in voice else google.Gender.MALE
-            )
+            voice_name=voice,
+            language_code=language
         )
         
         # Use the TTS engine to generate audio data - this uses LiveKit's TTS
