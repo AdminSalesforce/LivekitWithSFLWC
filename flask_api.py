@@ -758,7 +758,7 @@ def test_complete_flow():
         
         # Step 3: Generate TTS
         print("🔧 Step 3: Generating TTS...")
-        tts_audio = asyncio.run(process_text_with_tts(agent_response))
+        tts_audio = process_text_with_tts_sync(agent_response)
         
         if tts_audio:
             print(f"✅ TTS generated: {len(tts_audio)} characters")
@@ -970,8 +970,41 @@ def process_voice():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-async def process_text_with_tts(text, language='en-US', voice='en-US-Wavenet-A'):
-    """Converts text to base64 audio data using Google TTS via LiveKit"""
+def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
+    """Synchronous wrapper for TTS processing to avoid event loop issues"""
+    try:
+        print(f"🔧 Processing TTS for text: {text[:50]}...")
+        print(f"Language: {language}, Voice: {voice}")
+        
+        if not tts_engine:
+            print("❌ TTS engine not available")
+            return None
+        
+        # Create a new event loop for this TTS operation
+        import asyncio
+        import threading
+        
+        def run_tts_in_thread():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(process_text_with_tts_async(text, language, voice))
+            finally:
+                loop.close()
+        
+        # Run TTS in a separate thread with its own event loop
+        result = run_tts_in_thread()
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error in process_text_with_tts_sync: {e}")
+        logger.error(f"Error in process_text_with_tts_sync: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+async def process_text_with_tts_async(text, language='en-US', voice='en-US-Wavenet-A'):
+    """Async TTS processing function"""
     try:
         print(f"🔧 Processing TTS for text: {text[:50]}...")
         print(f"Language: {language}, Voice: {voice}")
@@ -1015,8 +1048,8 @@ async def process_text_with_tts(text, language='en-US', voice='en-US-Wavenet-A')
         return audio_base64
         
     except Exception as e:
-        print(f"❌ Error in process_text_with_tts: {e}")
-        logger.error(f"Error in process_text_with_tts: {e}")
+        print(f"❌ Error in process_text_with_tts_async: {e}")
+        logger.error(f"Error in process_text_with_tts_async: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -1103,8 +1136,8 @@ def text_to_speech():
         
         print("✅ TTS engine available, processing...")
         
-        # Process text with TTS
-        audio_content = asyncio.run(process_text_with_tts(text, language, voice))
+        # Process text with TTS using synchronous wrapper
+        audio_content = process_text_with_tts_sync(text, language, voice)
         
         print(f"✅ TTS generated, audio length: {len(audio_content) if audio_content else 'null'}")
         
