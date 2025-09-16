@@ -140,47 +140,63 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "{os.environ.get('GOOGLE_APPLICAT
 
 async def generate_tts():
    try:
-        # Initialize TTS engine with natural voice settings
-        tts_engine = google.TTS(
-            voice=google.Voice(
-                name="en-US-Wavenet-D",  # More natural, human-like voice
-                language_code="en-US",
-                ssml_gender="MALE"  # Natural male voice
-            ),
-            speaking_rate=0.9,  # Slightly slower for more natural speech
-            pitch=0.0,  # Natural pitch
-            volume_gain_db=0.0  # Natural volume
-        )
+       print("🔧 Starting TTS generation...")
+       
+       # Initialize TTS engine
+       print("🔧 Initializing TTS engine...")
+       tts_engine = google.TTS()
+       print("✅ TTS engine initialized")
        
        # Read text from file
-       with open('{temp_file_path}', 'r') as f:
+       print(f"🔧 Reading text from file: {temp_file_path}")
+       with open('{temp_file_path}', 'r', encoding='utf-8') as f:
            text = f.read()
        
-       print(f"Processing text: {{text[:50]}}...")
+       print(f"🔧 Processing text: {{text[:50]}}...")
        
-       # Generate audio using the same method as your working code
-       # Your working code: tts = google.TTS() then await session.say(response)
-       # This is the same tts.synthesize() that session.say() uses internally
+       if not text.strip():
+           print("❌ Empty text provided")
+           return None
+       
+       # Generate audio using LiveKit TTS synthesize method
+       print("🔧 Calling tts_engine.synthesize()...")
        audio_stream = tts_engine.synthesize(text=text)
+       print("✅ Audio stream created")
        
        audio_chunks = []
        
-       # Process audio stream (same as your working code's approach)
-       async for chunk in audio_stream:
-           if hasattr(chunk, 'frame') and chunk.frame:
-               audio_data = chunk.frame.data
-               audio_chunks.append(audio_data)
-               print(f"Collected chunk: {{len(audio_data)}} bytes")
+       # Process audio stream
+       print("🔧 Processing audio stream...")
+       try:
+           async for chunk in audio_stream:
+               if hasattr(chunk, 'frame') and chunk.frame:
+                   audio_data = chunk.frame.data
+                   audio_chunks.append(audio_data)
+                   print(f"🔧 Collected chunk: {{len(audio_data)}} bytes")
+               elif hasattr(chunk, 'data'):
+                   audio_data = chunk.data
+                   audio_chunks.append(audio_data)
+                   print(f"🔧 Collected chunk (data): {{len(audio_data)}} bytes")
+               else:
+                   print(f"🔧 Chunk type: {{type(chunk)}}, attributes: {{dir(chunk)}}")
+       except Exception as stream_error:
+           print(f"❌ Error processing audio stream: {{stream_error}}")
+           return None
        
        if not audio_chunks:
-           print("No audio chunks collected")
+           print("❌ No audio chunks collected")
            return None
        
        # Combine audio data
        full_audio_bytes = b"".join(audio_chunks)
-       print(f"Total audio bytes: {{len(full_audio_bytes)}}")
+       print(f"✅ Total audio bytes: {{len(full_audio_bytes)}}")
        
-       # Create WAV file (same format as your working code)
+       if len(full_audio_bytes) == 0:
+           print("❌ Empty audio data")
+           return None
+       
+       # Create WAV file
+       print("🔧 Creating WAV file...")
        wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
            b'RIFF', 36 + len(full_audio_bytes), b'WAVE', b'fmt ', 16, 1,
            1, 24000, 24000 * 1 * 16 // 8, 1 * 16 // 8, 16, b'data', len(full_audio_bytes)
@@ -189,12 +205,12 @@ async def generate_tts():
        
        # Convert to base64
        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
-       print(f"WAV audio created: {{len(wav_audio)}} bytes")
+       print(f"✅ WAV audio created: {{len(wav_audio)}} bytes, Base64: {{len(audio_base64)}} chars")
        
        return audio_base64
        
    except Exception as e:
-       print(f"Error in TTS: {{e}}")
+       print(f"❌ Error in TTS generation: {{e}}")
        import traceback
        traceback.print_exc()
        return None
@@ -231,11 +247,17 @@ if __name__ == "__main__":
                 if result.returncode == 0 and "SUCCESS:" in result.stdout:
                     # Extract the base64 audio data
                     audio_base64 = result.stdout.split("SUCCESS:")[1].strip()
-                    print("✅ TTS subprocess completed successfully")
-                    print(f"✅ Audio data length: {len(audio_base64)} characters")
-                    return audio_base64
+                    if audio_base64 and len(audio_base64) > 0:
+                        print("✅ TTS subprocess completed successfully")
+                        print(f"✅ Audio data length: {len(audio_base64)} characters")
+                        return audio_base64
+                    else:
+                        print("❌ TTS subprocess returned empty audio data")
+                        return None
                 else:
                     print("❌ TTS subprocess failed")
+                    print(f"❌ Return code: {result.returncode}")
+                    print(f"❌ Error output: {result.stderr}")
                     return None
 
             finally:
@@ -774,20 +796,11 @@ def initialize_livekit_components():
             print(f"❌ Failed to initialize STT engine: {e}")
             return False
         
-        # Initialize TTS engine with natural voice settings
+        # Initialize TTS engine
         try:
-            print("🔧 Initializing TTS engine with natural voice...")
-            tts_engine = google.TTS(
-                voice=google.Voice(
-                    name="en-US-Wavenet-D",  # More natural, human-like voice
-                    language_code="en-US",
-                    ssml_gender="MALE"  # Natural male voice
-                ),
-                speaking_rate=0.9,  # Slightly slower for more natural speech
-                pitch=0.0,  # Natural pitch
-                volume_gain_db=0.0  # Natural volume
-            )
-            print("✅ TTS engine initialized with natural voice settings")
+            print("🔧 Initializing TTS engine...")
+            tts_engine = google.TTS()
+            print("✅ TTS engine initialized successfully")
         except Exception as e:
             print(f"❌ Failed to initialize TTS engine: {e}")
             return False
@@ -931,6 +944,39 @@ def clear_cache():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/debug/test-tts', methods=['POST'])
+def test_tts():
+    """Debug endpoint to test TTS functionality"""
+    try:
+        data = request.get_json()
+        test_text = data.get('text', 'Hello, this is a test of the text-to-speech system.')
+        
+        print(f"🔧 Testing TTS with text: {test_text}")
+        
+        # Test TTS generation
+        audio_content = process_text_with_tts_sync(test_text)
+        
+        if audio_content:
+            return jsonify({
+                "success": True,
+                "message": "TTS test successful",
+                "audio_length": len(audio_content),
+                "text": test_text
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "TTS test failed",
+                "text": test_text
+            })
+    except Exception as e:
+        print(f"❌ TTS test error: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "text": test_text if 'test_text' in locals() else "unknown"
+        }), 500
+
 @app.route('/api/voice/stt', methods=['POST'])
 def speech_to_text():
     """Speech-to-Text endpoint - STT is handled by browser in LWC"""
@@ -989,6 +1035,21 @@ def text_to_speech():
 
         # Process text with TTS using LiveKit directly (matching working code)
         audio_content = process_text_with_tts_sync(text, language, voice)
+
+        if not audio_content:
+            print("❌ TTS generation failed, trying fallback...")
+            # Fallback: return a simple response indicating TTS failed
+            response_data = {
+                "audio_content": None,
+                "audio_data": None,
+                "text": text,
+                "language": language,
+                "voice": voice,
+                "error": "TTS generation failed",
+                "fallback_message": "Text-to-speech is temporarily unavailable. Please read the text response."
+            }
+            print("❌ TTS fallback response sent")
+            return jsonify(response_data)
 
         print(f"✅ TTS generated, audio length: {len(audio_content) if audio_content else 'null'}")
 
