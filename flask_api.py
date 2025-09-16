@@ -1078,7 +1078,7 @@ def preprocess_text_for_tts(text):
     return text
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
-    """TTS processing using simple approach without event loop conflicts"""
+    """TTS processing using the exact approach from working code"""
     global tts_cache
     
     try:
@@ -1099,59 +1099,19 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         processed_text = preprocess_text_for_tts(text)
         print(f"🔧 Processed text for TTS: {processed_text[:50]}...")
         
-        # Use a simple approach - try to get audio directly
+        # Use the exact approach from working code - direct async call
         try:
-            print("🔧 Attempting direct TTS processing...")
+            print("🔧 Using direct async approach from working code...")
             
-            # Try to use the TTS engine directly in a new thread with its own event loop
-            import threading
-            import queue
+            # Create a new event loop for this operation
             import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             
-            result_queue = queue.Queue()
-            exception_queue = queue.Queue()
-            
-            def run_tts():
-                try:
-                    # Create new event loop for this thread
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    # Run the async TTS function
-                    result = loop.run_until_complete(process_text_with_tts_async(processed_text, language, voice))
-                    result_queue.put(result)
-                    
-                except Exception as e:
-                    print(f"❌ TTS thread error: {e}")
-                    exception_queue.put(e)
-                    import traceback
-                    traceback.print_exc()
-                finally:
-                    try:
-                        loop.close()
-                    except:
-                        pass
-            
-            # Start the thread
-            tts_thread = threading.Thread(target=run_tts)
-            tts_thread.start()
-            
-            # Wait for completion
-            tts_thread.join(timeout=20)
-            
-            if tts_thread.is_alive():
-                print("❌ TTS processing timed out")
-                return None
-            
-            # Check for exceptions
-            if not exception_queue.empty():
-                exception = exception_queue.get()
-                print(f"❌ TTS processing failed: {exception}")
-                return None
-            
-            # Get result
-            if not result_queue.empty():
-                result = result_queue.get()
+            try:
+                # Run the async TTS function directly
+                result = loop.run_until_complete(process_text_with_tts_async(processed_text, language, voice))
+                
                 if result:
                     # Cache the result
                     tts_cache[cache_key] = result
@@ -1160,9 +1120,23 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
                 else:
                     print("❌ No result from TTS processing")
                     return None
-            else:
-                print("❌ No result from TTS processing")
-                return None
+                    
+            finally:
+                # Clean up the event loop
+                try:
+                    # Cancel any remaining tasks
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    
+                    # Wait for tasks to complete
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    
+                    # Close the loop
+                    loop.close()
+                except Exception as cleanup_error:
+                    print(f"⚠️ Error during loop cleanup: {cleanup_error}")
                 
         except Exception as e:
             print(f"❌ Error in TTS processing: {e}")
