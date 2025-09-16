@@ -279,7 +279,6 @@ def initialize_livekit_components():
                 )
             
             # Run AgentSession creation in a separate thread with its own event loop
-            global agent_session
             agent_session = create_agent_session()
             print("✅ AgentSession created successfully")
         except Exception as e:
@@ -289,7 +288,6 @@ def initialize_livekit_components():
         # Create Agent
         try:
             print("🔧 Creating Agent...")
-            global agent
             agent = Agent(
                 instructions="You are a helpful Salesforce voice assistant. Help users with their Salesforce cases and questions. Always provide helpful and engaging responses."
             )
