@@ -1049,6 +1049,7 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         import subprocess
         import tempfile
         import json
+        import sys
         
         # Create temporary file with text
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
