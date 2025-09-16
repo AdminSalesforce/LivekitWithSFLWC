@@ -189,6 +189,9 @@ agent_session = None
 agent = None
 llm_engine = None
 
+# Session cache to store active Salesforce sessions
+session_cache = {}
+
 def initialize_livekit_components():
     """Initialize LiveKit components for voice processing"""
     global stt_engine, tts_engine, vad_engine, agent_session, agent, llm_engine
@@ -299,6 +302,55 @@ def initialize_livekit_components():
 # to avoid import-time dependencies
 SalesforceLLM = None
 
+async def get_or_create_salesforce_session(agent_id, session_id):
+    """Get existing session or create a new one if needed"""
+    global session_cache
+    
+    # Create cache key based on agent_id and session_id
+    cache_key = f"{agent_id}_{session_id}"
+    
+    # Check if we have an active session in cache
+    if cache_key in session_cache:
+        cached_session = session_cache[cache_key]
+        print(f"✅ Found cached session for {cache_key}: {cached_session['salesforce_session_id']}")
+        
+        # Validate the session is still active (optional - you could add a validation call here)
+        # For now, we'll assume cached sessions are still valid
+        return cached_session['salesforce_session_id']
+    
+    # No cached session, create a new one
+    print(f"🔧 No cached session found for {cache_key}, creating new session...")
+    salesforce_session_id = await start_salesforce_session(agent_id, session_id)
+    
+    if salesforce_session_id:
+        # Cache the session
+        session_cache[cache_key] = {
+            'salesforce_session_id': salesforce_session_id,
+            'created_at': time.time(),
+            'agent_id': agent_id,
+            'session_id': session_id
+        }
+        print(f"✅ Cached new session for {cache_key}: {salesforce_session_id}")
+    
+    return salesforce_session_id
+
+def clear_expired_sessions():
+    """Clear expired sessions from cache (older than 1 hour)"""
+    global session_cache
+    current_time = time.time()
+    expired_keys = []
+    
+    for key, session_data in session_cache.items():
+        if current_time - session_data['created_at'] > 3600:  # 1 hour
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        del session_cache[key]
+        print(f"🗑️ Cleared expired session: {key}")
+    
+    if expired_keys:
+        print(f"✅ Cleared {len(expired_keys)} expired sessions")
+
 async def start_salesforce_session(agent_id, session_id):
     """Start a Salesforce Einstein Agent session"""
     try:
@@ -392,11 +444,11 @@ async def call_einstein_agent(message, session_id, agent_id=None):
             print("❌ Failed to get Salesforce access token")
             return "I'm sorry, I'm having trouble connecting to Salesforce right now."
         
-        # Start a Salesforce session first
-        print("🔧 Starting Salesforce session...")
-        salesforce_session_id = await start_salesforce_session(agent_id, session_id)
+        # Get or create a Salesforce session (with caching)
+        print("🔧 Getting or creating Salesforce session...")
+        salesforce_session_id = await get_or_create_salesforce_session(agent_id, session_id)
         if not salesforce_session_id:
-            print("❌ Failed to start Salesforce session")
+            print("❌ Failed to get or create Salesforce session")
             return "I'm sorry, I'm having trouble connecting to Salesforce right now."
         
         headers = {
@@ -824,6 +876,16 @@ def list_salesforce_agents():
             "total_count": 0
         })
 
+@app.route('/api/debug/sessions')
+def debug_sessions():
+    """Debug endpoint to view active sessions"""
+    global session_cache
+    return jsonify({
+        "active_sessions": len(session_cache),
+        "sessions": session_cache,
+        "cache_keys": list(session_cache.keys())
+    })
+
 @app.route('/api/debug/init-livekit')
 def debug_init_livekit():
     """Debug endpoint to manually initialize LiveKit components"""
@@ -890,6 +952,10 @@ def einstein_agent():
     """Einstein Agent endpoint"""
     try:
         print("=== EINSTEIN AGENT API CALLED ===")
+        
+        # Clear expired sessions before processing
+        clear_expired_sessions()
+        
         data = request.get_json()
         print("Request data:", json.dumps(data, indent=2))
         
