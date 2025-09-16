@@ -1208,8 +1208,7 @@ async def process_text_with_livekit_session_say(text):
             print("🔧 Creating room context for AgentSession...")
             
             # Import LiveKit room components
-            from livekit import Room
-            from livekit.rtc import RoomOptions
+            from livekit.rtc import Room, RoomOptions
             
             # Create a room for the AgentSession
             room = Room()
@@ -1228,16 +1227,16 @@ async def process_text_with_livekit_session_say(text):
             await agent_session.say(text)
             print("✅ LiveKit session.say() completed successfully")
             
-            # Since session.say() is designed for real-time audio streaming to a room,
-            # we need to capture the audio data that would normally be sent to the room
-            # For API context, we need to get the audio data from the TTS engine directly
-            # but in a way that's compatible with LiveKit's approach
+            # For API context, we need to capture the audio that session.say() generates
+            # Since session.say() streams audio to the room, we need to capture it
+            # We'll use the TTS engine to generate the same audio for API response
+            # but only after session.say() has completed
             
             if not tts_engine:
                 print("❌ TTS engine not available for audio capture")
                 return None
             
-            print("🔧 Capturing audio data from TTS engine...")
+            print("🔧 Capturing audio data for API response...")
             audio_stream = tts_engine.synthesize(text=text)
             print(f"🔧 Audio stream created: {audio_stream}")
             
