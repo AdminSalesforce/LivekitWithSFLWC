@@ -1204,7 +1204,27 @@ async def process_text_with_livekit_session_say(text):
         # The session.say() method is the correct LiveKit approach
         # It internally handles TTS and returns audio data
         try:
-            # This is the proper LiveKit way - exactly like your working code
+            # Create a room context for AgentSession to work properly
+            print("🔧 Creating room context for AgentSession...")
+            
+            # Import LiveKit room components
+            from livekit import Room
+            from livekit.rtc import RoomOptions
+            
+            # Create a room for the AgentSession
+            room = Room()
+            room_options = RoomOptions()
+            
+            # Connect to the room (this will start the AgentSession)
+            print("🔧 Connecting to room to start AgentSession...")
+            await room.connect(os.environ.get("LIVEKIT_URL"), os.environ.get("LIVEKIT_API_KEY"), os.environ.get("LIVEKIT_API_SECRET"))
+            
+            # Start the AgentSession with the room
+            print("🔧 Starting AgentSession with room...")
+            await agent_session.start(room=room, agent=agent)
+            
+            # Now we can use session.say() properly
+            print("🔧 AgentSession is now running, calling session.say()...")
             await agent_session.say(text)
             print("✅ LiveKit session.say() completed successfully")
             
