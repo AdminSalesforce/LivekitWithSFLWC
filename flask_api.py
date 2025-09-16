@@ -1191,60 +1191,118 @@ async def process_text_with_livekit_tts(text):
         # Use LiveKit AgentSession approach - exactly like working code
         print("🔧 Using LiveKit AgentSession.say() method...")
         
-        # Create a mock room for the session (since we don't have a real room in API context)
-        # This is a simplified approach that mimics the working code's session.say()
-        print("🔧 Calling tts_engine.synthesize...")
-        audio_stream = tts_engine.synthesize(text=text)
-        print(f"🔧 Audio stream created: {audio_stream}")
+        # The working code uses session.say() which internally handles TTS
+        # But since we're in an API context without a real room, we need to use TTS directly
+        # However, we need to do it in a way that doesn't conflict with the event loop
         
-        audio_chunks = []
-        chunk_count = 0
+        # Create a new event loop for this TTS operation to avoid conflicts
+        import asyncio
+        import threading
+        import queue
         
-        # Simple iteration exactly like working code
-        print("🔧 Collecting audio chunks...")
-        try:
-            async for chunk in audio_stream:
-                chunk_count += 1
-                print(f"🔧 Processing chunk {chunk_count}: {type(chunk)}")
+        result_queue = queue.Queue()
+        exception_queue = queue.Queue()
+        
+        def run_tts_in_thread():
+            try:
+                # Create a completely new event loop for this thread
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
                 
-                if hasattr(chunk, 'frame') and chunk.frame:
-                    audio_data = chunk.frame.data
-                    audio_chunks.append(audio_data)
-                    print(f"🔧 Collected audio chunk {chunk_count}: {len(audio_data)} bytes")
-                elif hasattr(chunk, 'data'):
-                    audio_data = chunk.data
-                    audio_chunks.append(audio_data)
-                    print(f"🔧 Collected audio chunk {chunk_count} (data): {len(audio_data)} bytes")
-                else:
-                    print(f"🔧 Chunk {chunk_count} has no frame or data: {dir(chunk)}")
-        except Exception as e:
-            print(f"❌ Error during audio chunk collection: {e}")
-            import traceback
-            traceback.print_exc()
+                async def tts_worker():
+                    try:
+                        print("🔧 Calling tts_engine.synthesize in new event loop...")
+                        audio_stream = tts_engine.synthesize(text=text)
+                        print(f"🔧 Audio stream created: {audio_stream}")
+                        
+                        audio_chunks = []
+                        chunk_count = 0
+                        
+                        # Simple iteration exactly like working code
+                        print("🔧 Collecting audio chunks...")
+                        async for chunk in audio_stream:
+                            chunk_count += 1
+                            print(f"🔧 Processing chunk {chunk_count}: {type(chunk)}")
+                            
+                            if hasattr(chunk, 'frame') and chunk.frame:
+                                audio_data = chunk.frame.data
+                                audio_chunks.append(audio_data)
+                                print(f"🔧 Collected audio chunk {chunk_count}: {len(audio_data)} bytes")
+                            elif hasattr(chunk, 'data'):
+                                audio_data = chunk.data
+                                audio_chunks.append(audio_data)
+                                print(f"🔧 Collected audio chunk {chunk_count} (data): {len(audio_data)} bytes")
+                            else:
+                                print(f"🔧 Chunk {chunk_count} has no frame or data: {dir(chunk)}")
+                        
+                        print(f"🔧 Total chunks collected: {chunk_count}")
+                        print(f"🔧 Audio chunks list length: {len(audio_chunks)}")
+                        
+                        if not audio_chunks:
+                            print("❌ No audio chunks collected")
+                            return None
+                            
+                        full_audio_bytes = b"".join(audio_chunks)
+                        print(f"✅ Total audio bytes collected: {len(full_audio_bytes)}")
+                        
+                        if len(full_audio_bytes) == 0:
+                            print("❌ Empty audio data")
+                            return None
+                        
+                        # Convert to WAV format exactly like working code
+                        print("🔧 Creating WAV file...")
+                        wav_audio = create_wav_file(full_audio_bytes)
+                        print(f"🔧 WAV file created: {len(wav_audio)} bytes")
+                        
+                        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
+                        print(f"✅ WAV audio created: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
+                        return audio_base64
+                        
+                    except Exception as e:
+                        print(f"❌ Error in TTS worker: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        return None
+                
+                # Run the TTS worker in the new event loop
+                result = new_loop.run_until_complete(tts_worker())
+                result_queue.put(result)
+                
+            except Exception as e:
+                print(f"❌ Error in TTS thread: {e}")
+                exception_queue.put(e)
+                import traceback
+                traceback.print_exc()
+            finally:
+                try:
+                    new_loop.close()
+                except:
+                    pass
+        
+        # Start the TTS thread
+        tts_thread = threading.Thread(target=run_tts_in_thread)
+        tts_thread.start()
+        
+        # Wait for completion
+        tts_thread.join(timeout=30)
+        
+        if tts_thread.is_alive():
+            print("❌ TTS processing timed out")
             return None
         
-        print(f"🔧 Total chunks collected: {chunk_count}")
-        print(f"🔧 Audio chunks list length: {len(audio_chunks)}")
-        
-        if not audio_chunks:
-            print("❌ No audio chunks collected")
-            return None
-            
-        full_audio_bytes = b"".join(audio_chunks)
-        print(f"✅ Total audio bytes collected: {len(full_audio_bytes)}")
-        
-        if len(full_audio_bytes) == 0:
-            print("❌ Empty audio data")
+        # Check for exceptions
+        if not exception_queue.empty():
+            exception = exception_queue.get()
+            print(f"❌ TTS processing failed: {exception}")
             return None
         
-        # Convert to WAV format exactly like working code
-        print("🔧 Creating WAV file...")
-        wav_audio = create_wav_file(full_audio_bytes)
-        print(f"🔧 WAV file created: {len(wav_audio)} bytes")
-        
-        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
-        print(f"✅ WAV audio created: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
-        return audio_base64
+        # Get result
+        if not result_queue.empty():
+            result = result_queue.get()
+            return result
+        else:
+            print("❌ No result from TTS processing")
+            return None
         
     except Exception as e:
         print(f"❌ Error in process_text_with_livekit_tts: {e}")
