@@ -1,188 +1,30 @@
-#!/usr/bin/env python3
-"""
-Flask API wrapper for the Salesforce Voice Agent with Einstein Agent and LiveKit
-"""
-
-from flask import Flask, request, jsonify
 import os
-import aiohttp
-import asyncio
+import sys
 import json
-import uuid
-import tempfile
-import logging
-import time
 import base64
-from flask_cors import CORS
+import tempfile
+import subprocess
+import asyncio
+import logging
+from flask import Flask, request, jsonify
+try:
+    from flask_cors import CORS
+except ImportError:
+    print("Warning: flask-cors not installed, CORS may not work properly")
+    CORS = None
+from livekit.plugins import google
+from livekit.agents import Agent, AgentSession
 
-# Initialize logging first
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Handle Google credentials for cloud deployment BEFORE LiveKit imports
-def setup_google_credentials():
-    """Setup Google credentials for both local and cloud deployment"""
-    print("🔧 Starting Google credentials setup...")
-    try:
-        # Method 1: Try Render secret file (for cloud deployment)
-        secret_file_path = "/etc/secrets/google-credentials.json"
-        print(f"🔧 Checking secret file: {secret_file_path}")
-        if os.path.exists(secret_file_path):
-            print(f"✅ Secret file found: {secret_file_path}")
-            
-            # Fix the private key format in the credentials file
-            try:
-                with open(secret_file_path, 'r') as f:
-                    creds_data = json.load(f)
-                
-                # Fix private key format - ensure it has proper line breaks
-                if 'private_key' in creds_data:
-                    private_key = creds_data['private_key']
-                    # Replace escaped newlines with actual newlines
-                    if '\\n' in private_key:
-                        private_key = private_key.replace('\\n', '\n')
-                        # Ensure proper PEM format
-                        if not private_key.startswith('-----BEGIN'):
-                            private_key = '-----BEGIN PRIVATE KEY-----\n' + private_key + '\n-----END PRIVATE KEY-----'
-                        creds_data['private_key'] = private_key
-                        
-                    # Write the fixed credentials to a temporary file
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_f:
-                        json.dump(creds_data, temp_f)
-                        temp_creds_path = temp_f.name
-                        
-                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds_path
-                    print(f"✅ Fixed private key format and set credentials: {temp_creds_path}")
-                    print(f"✅ Environment variable set to: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
-                    logger.info(f"✅ Google credentials set from Render secret file with fixed private key: {temp_creds_path}")
-                    return True
-            except Exception as e:
-                print(f"❌ Error fixing credentials file: {e}")
-                # Fallback to original file
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_file_path
-                logger.info(f"✅ Google credentials set from Render secret file: {secret_file_path}")
-                return True
-        else:
-            print(f"❌ Secret file not found: {secret_file_path}")
-        
-        # Method 2: Try local google-credentials.json file
-        print("🔧 Checking local file: google-credentials.json")
-        if os.path.exists("google-credentials.json"):
-            print("✅ Local file found: google-credentials.json")
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "google-credentials.json"
-            logger.info("✅ Google credentials set from local file: google-credentials.json")
-            return True
-        else:
-            print("❌ Local file not found: google-credentials.json")
-        
-        # Method 3: Try JSON string from environment variable (fallback)
-        if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ:
-            creds_json = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
-            logger.info("Found GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable")
-            try:
-                creds_data = json.loads(creds_json)
-                
-                # Create temporary file for Google credentials
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                    json.dump(creds_data, f)
-                    creds_path = f.name
-                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-                    logger.info(f"✅ Google credentials set from JSON string: {creds_path}")
-                    return True
-            except json.JSONDecodeError as e:
-                logger.error(f"❌ Invalid JSON in GOOGLE_APPLICATION_CREDENTIALS_JSON: {e}")
-                return False
-        
-        # Method 4: Try direct file path (for local deployment)
-        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google-credentials.json")
-        if os.path.exists(creds_path):
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-            logger.info(f"✅ Google credentials set from file: {creds_path}")
-            return True
-        
-        # No credentials found
-        print("❌ No Google credentials found!")
-        logger.error("❌ No Google credentials found!")
-        logger.error("Please add google-credentials.json as a secret file in Render")
-        logger.error("Or set GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable")
-        return False
-        
-    except Exception as e:
-        print(f"❌ Failed to setup Google credentials: {e}")
-        logger.error(f"❌ Failed to setup Google credentials: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-# Initialize Google credentials BEFORE LiveKit imports
-print("🔧 Setting up Google credentials...")
-google_creds_ok = setup_google_credentials()
-print(f"🔧 Google credentials setup result: {google_creds_ok}")
-
-# Set Google API key for TTS
-if google_creds_ok:
-    try:
-        os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY", "YOUR_GOOGLE_API_KEY")
-        print(f"✅ Google API key set: {os.environ['GOOGLE_API_KEY'][:10]}...")
-    except Exception as e:
-        print(f"❌ Failed to set Google API key: {e}")
-
-# Set LiveKit environment variables
-os.environ["LIVEKIT_API_KEY"] = os.getenv("LIVEKIT_API_KEY", "YOUR_LIVEKIT_API_KEY")
-os.environ["LIVEKIT_API_SECRET"] = os.getenv("LIVEKIT_API_SECRET", "YOUR_LIVEKIT_API_SECRET")
-os.environ["LIVEKIT_URL"] = os.getenv("LIVEKIT_URL", "YOUR_LIVEKIT_URL")
-
-# Verify credentials are properly set before LiveKit imports
-print(f"🔧 Final GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
-print(f"🔧 File exists: {os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', ''))}")
-
-# LiveKit imports - must be at module level for plugin registration
-from livekit.agents import Agent
-from livekit.agents.voice import AgentSession
-from livekit.plugins import google
-
+# Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+if CORS:
+    CORS(app)
 
-# Enable LiveKit debug logs
-os.environ["LIVEKIT_LOG_LEVEL"] = "debug"
-logging.getLogger("livekit").setLevel(logging.DEBUG)
-
-# Salesforce configuration
-print("🔧 Loading Salesforce configuration...")
-SALESFORCE_DOMAIN = os.getenv("SALESFORCE_ORG_DOMAIN", "https://de1740385138027.my.salesforce.com")
-SALESFORCE_CLIENT_ID = os.getenv("SALESFORCE_CLIENT_ID")
-SALESFORCE_CLIENT_SECRET = os.getenv("SALESFORCE_CLIENT_SECRET")
-
-print(f"🔧 Salesforce Configuration Status:")
-print(f"  - Domain: {SALESFORCE_DOMAIN}")
-print(f"  - Client ID: {'SET' if SALESFORCE_CLIENT_ID else 'NOT SET'}")
-print(f"  - Client Secret: {'SET' if SALESFORCE_CLIENT_SECRET else 'NOT SET'}")
-
-if SALESFORCE_CLIENT_ID:
-    print(f"  - Client ID Value: {SALESFORCE_CLIENT_ID[:20]}...")
-else:
-    print("  - Client ID Value: None")
-
-if SALESFORCE_CLIENT_SECRET:
-    print(f"  - Client Secret Value: {SALESFORCE_CLIENT_SECRET[:20]}...")
-else:
-    print("  - Client Secret Value: None")
-
-# Validate Salesforce configuration
-if not SALESFORCE_CLIENT_ID or SALESFORCE_CLIENT_ID == "YOUR_SALESFORCE_CLIENT_ID":
-    print("❌ SALESFORCE_CLIENT_ID environment variable not set")
-    logger.error("SALESFORCE_CLIENT_ID environment variable not set")
-else:
-    print("✅ SALESFORCE_CLIENT_ID is properly set")
-
-if not SALESFORCE_CLIENT_SECRET or SALESFORCE_CLIENT_SECRET == "YOUR_SALESFORCE_CLIENT_SECRET":
-    print("❌ SALESFORCE_CLIENT_SECRET environment variable not set")
-    logger.error("SALESFORCE_CLIENT_SECRET environment variable not set")
-else:
-    print("✅ SALESFORCE_CLIENT_SECRET is properly set")
-
-# LiveKit components (will be initialized when needed)
+# Global variables for LiveKit components
 stt_engine = None
 tts_engine = None
 vad_engine = None
@@ -190,1156 +32,239 @@ agent_session = None
 agent = None
 llm_engine = None
 
-# Session cache to store active Salesforce sessions
-session_cache = {}
-
-# TTS cache to store generated audio for repeated text
-tts_cache = {}
-
 # TTS engine cache to store TTS engines for different voices
 tts_engine_cache = {}
 
-def initialize_livekit_components():
-    """Initialize LiveKit components for voice processing"""
-    global stt_engine, tts_engine, vad_engine, agent_session, agent, llm_engine
-    
-    print("🚀 Starting LiveKit components initialization...")
-    print(f"🔧 Current tts_engine: {tts_engine is not None}")
-    print(f"🔧 Current agent_session: {agent_session is not None}")
-    
-    try:
-        # Check if Google credentials are properly set
-        if not google_creds_ok:
-            print("❌ Google credentials not available, skipping LiveKit initialization")
-            logger.warning("Google credentials not available, skipping LiveKit initialization")
-            return False
-        
-        # Verify Google credentials file exists and is readable
-        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        if not creds_path or not os.path.exists(creds_path):
-            print(f"❌ Google credentials file not found: {creds_path}")
-            logger.error(f"Google credentials file not found: {creds_path}")
-            return False
-        
-        # Debug: Check Google credentials before initializing
-        print(f"Before LiveKit init - GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
-        print(f"Before LiveKit init - File exists: {os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', ''))}")
-        
-        # Try to read the credentials file to verify it's valid JSON
-        try:
-            with open(creds_path, 'r') as f:
-                creds_content = f.read()
-                print(f"Credentials file size: {len(creds_content)} characters")
-                # Try to parse as JSON to verify it's valid
-                json.loads(creds_content)
-                print("✅ Credentials file is valid JSON")
-        except Exception as e:
-            print(f"❌ Error reading credentials file: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-        
-        # Initialize Google STT (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
-        try:
-            print("🔧 Initializing Google STT...")
-            stt_engine = google.STT(
-                model="latest_long",
-                spoken_punctuation=True,
-                languages="en-US",
-            )
-            print("✅ Google STT initialized successfully")
-        except Exception as e:
-            print(f"❌ Failed to initialize Google STT: {e}")
-            raise e
-        
-        # Initialize Google TTS with proper voice configuration (let it use GOOGLE_APPLICATION_CREDENTIALS automatically)
-        try:
-            print("🔧 Initializing Google TTS with voice configuration...")
-            tts_engine = google.TTS(
-                voice=google.Voice(
-                    language="en-US",
-                    name="en-US-Wavenet-A"
-                )
-            )
-            print("✅ Google TTS initialized successfully with voice configuration")
-        except Exception as e:
-            print(f"❌ Failed to initialize Google TTS: {e}")
-            raise e
-        
-        # VAD (Voice Activity Detection) is not available in current LiveKit version
-        # Skip VAD initialization
-        print("🔧 Skipping VAD initialization (not available in current LiveKit version)")
-        vad_engine = None
-        
-        # Create AgentSession with STT and TTS - following official LiveKit documentation
-        try:
-            print("🔧 Creating AgentSession...")
-            # Create a new event loop for AgentSession
-            import asyncio
-            import threading
-            
-            def create_agent_session():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                return AgentSession(
-                    stt=stt_engine,
-                    tts=tts_engine,
-                )
-            
-            # Run AgentSession creation in a separate thread with its own event loop
-            agent_session = create_agent_session()
-            print("✅ AgentSession created successfully")
-        except Exception as e:
-            print(f"❌ Failed to create AgentSession: {e}")
-            raise e
-        
-        # Create Agent
-        try:
-            print("🔧 Creating Agent...")
-            agent = Agent(
-                instructions="You are a helpful Salesforce voice assistant. Help users with their Salesforce cases and questions. Always provide helpful and engaging responses."
-            )
-            print("✅ Agent created successfully")
-        except Exception as e:
-            print(f"❌ Failed to create Agent: {e}")
-            raise e
-        
-        logger.info("LiveKit components initialized successfully")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to initialize LiveKit components: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-# SalesforceLLM class will be defined dynamically in initialize_livekit_components()
-# to avoid import-time dependencies
-SalesforceLLM = None
-
-async def get_or_create_salesforce_session(agent_id, session_id):
-    """Get existing session or create a new one if needed"""
-    global session_cache
-    
-    # Create cache key based on agent_id and session_id
-    cache_key = f"{agent_id}_{session_id}"
-    
-    # Check if we have an active session in cache
-    if cache_key in session_cache:
-        cached_session = session_cache[cache_key]
-        print(f"✅ Found cached session for {cache_key}: {cached_session['salesforce_session_id']}")
-        
-        # Validate the session is still active (optional - you could add a validation call here)
-        # For now, we'll assume cached sessions are still valid
-        return cached_session['salesforce_session_id']
-    
-    # No cached session, create a new one
-    print(f"🔧 No cached session found for {cache_key}, creating new session...")
-    salesforce_session_id = await start_salesforce_session(agent_id, session_id)
-    
-    if salesforce_session_id:
-        # Cache the session
-        session_cache[cache_key] = {
-            'salesforce_session_id': salesforce_session_id,
-            'created_at': time.time(),
-            'agent_id': agent_id,
-            'session_id': session_id
-        }
-        print(f"✅ Cached new session for {cache_key}: {salesforce_session_id}")
-    
-    return salesforce_session_id
-
-def clear_expired_sessions():
-    """Clear expired sessions from cache (older than 1 hour)"""
-    global session_cache
-    current_time = time.time()
-    expired_keys = []
-    
-    for key, session_data in session_cache.items():
-        if current_time - session_data['created_at'] > 3600:  # 1 hour
-            expired_keys.append(key)
-    
-    for key in expired_keys:
-        del session_cache[key]
-        print(f"🗑️ Cleared expired session: {key}")
-    
-    if expired_keys:
-        print(f"✅ Cleared {len(expired_keys)} expired sessions")
-
-def clear_tts_cache():
-    """Clear TTS cache to free memory"""
-    global tts_cache
-    cache_size = len(tts_cache)
-    tts_cache.clear()
-    print(f"🗑️ Cleared TTS cache: {cache_size} entries")
-
-async def start_salesforce_session(agent_id, session_id):
-    """Start a Salesforce Einstein Agent session"""
-    try:
-        print(f"🔧 Starting Salesforce session:")
-        print(f"  - Agent ID: {agent_id}")
-        print(f"  - Session ID: {session_id}")
-        
-        # Get access token first
-        access_token = await get_salesforce_access_token()
-        if not access_token:
-            print("❌ Failed to get Salesforce access token")
-            return None
-        
-        headers = {
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
-        }
-        
-        # Use api.salesforce.com for session creation
-        url = f"https://api.salesforce.com/einstein/ai-agent/v1/agents/{agent_id}/sessions"
-        print(f"🔧 Session creation URL: {url}")
-        
-        # Match your working payload structure exactly
-        payload = {
-            "externalSessionKey": session_id,
-            "instanceConfig": {
-                "endpoint": SALESFORCE_DOMAIN
-            },
-            "tz": "America/Los_Angeles",
-            "variables": [
-                {
-                    "name": "$Context.EndUserLanguage",
-                    "type": "Text",
-                    "value": "en_US"
-                }
-            ],
-            "featureSupport": "Streaming",
-            "streamingCapabilities": {
-                "chunkTypes": [
-                    "Text"
-                ]
-            },
-            "bypassUser": False
-        }
-        
-        print(f"🔧 Session payload: {json.dumps(payload, indent=2)}")
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as response:
-                print(f"🔧 Start session response status: {response.status}")
-                
-                if response.status == 200:
-                    result = await response.json()
-                    print(f"✅ Session started successfully")
-                    print(f"  - Full session response: {json.dumps(result, indent=2)}")
-                    
-                    # Store the actual session ID from Salesforce response
-                    salesforce_session_id = result.get('sessionId')
-                    print(f"✅ Salesforce session ID: {salesforce_session_id}")
-                    print(f"  - Session ID length: {len(salesforce_session_id) if salesforce_session_id else 0}")
-                    print(f"  - Response keys: {list(result.keys())}")
-                    return salesforce_session_id
-                else:
-                    text = await response.text()
-                    print(f"❌ Failed to start session: {text}")
-                    return None
-                    
-    except Exception as e:
-        print(f"❌ Error starting Salesforce session: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-async def call_einstein_agent(message, session_id, agent_id=None):
-    """Call Salesforce Einstein Agent API with dynamic agent ID"""
-    try:
-        print(f"🔧 Einstein Agent Call Debug:")
-        print(f"  - Message: {message}")
-        print(f"  - Session ID: {session_id}")
-        print(f"  - Agent ID: {agent_id}")
-        
-        # Agent ID is required - must be provided dynamically
-        if not agent_id:
-            print("❌ Error: Agent ID is required but not provided")
-            return "Error: Agent ID is required but not provided"
-        
-        # Get Salesforce access token
-        print("🔧 Getting Salesforce access token...")
-        access_token = await get_salesforce_access_token()
-        if not access_token:
-            print("❌ Failed to get Salesforce access token")
-            return "I'm sorry, I'm having trouble connecting to Salesforce right now."
-        
-        # Get or create a Salesforce session (with caching)
-        print("🔧 Getting or creating Salesforce session...")
-        salesforce_session_id = await get_or_create_salesforce_session(agent_id, session_id)
-        if not salesforce_session_id:
-            print("❌ Failed to get or create Salesforce session")
-            return "I'm sorry, I'm having trouble connecting to Salesforce right now."
-        
-        headers = {
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
-        }
-        
-        # Use api.salesforce.com for message sending
-        # Use the actual Salesforce session ID, not our local session ID
-        url = f"https://api.salesforce.com/einstein/ai-agent/v1/sessions/{salesforce_session_id}/messages"
-        print(f"🔧 Message URL: {url}")
-        print(f"🔧 Using Salesforce session ID: {salesforce_session_id}")
-        
-        # Match your working message payload structure exactly
-        payload = {
-            "message": {
-                "sequenceId": str(int(time.time() * 1000)),
-                "type": "Text",
-                "text": message
-            }
-        }
-        
-        print(f"🔧 Message payload: {json.dumps(payload, indent=2)}")
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as response:
-                print(f"🔧 Salesforce API response status: {response.status}")
-                print(f"🔧 Response headers: {dict(response.headers)}")
-                
-                if response.status == 200:
-                    result = await response.json()
-                    print(f"✅ Salesforce message response received")
-                    print(f"  - Full response: {json.dumps(result, indent=2)}")
-                    print(f"  - Response keys: {list(result.keys())}")
-                    
-                    # Parse the response according to your working structure
-                    if 'message' in result:
-                        # Direct message response
-                        message_text = result.get('message', 'No response message')
-                        print(f"✅ Direct message response: {message_text}")
-                        return message_text
-                    elif 'messages' in result:
-                        # Array response format
-                        messages = result.get('messages', [])
-                        print(f"  - Messages array length: {len(messages)}")
-                        
-                        if messages and len(messages) > 0:
-                            message_obj = messages[0]
-                            message_type = message_obj.get('type', '')
-                            print(f"  - First message type: {message_type}")
-                            print(f"  - First message content: {json.dumps(message_obj, indent=2)}")
-                            
-                            # Handle different response types
-                            if message_type == 'Inform':
-                                response_text = message_obj.get('message', 'No response message')
-                                print(f"✅ Inform response: {response_text}")
-                                return response_text
-                            elif message_type == 'Failure':
-                                # Handle failure responses
-                                print(f"❌ Salesforce returned Failure: {message_obj}")
-                                
-                                # Check if there's a message field with content
-                                if message_obj.get('message'):
-                                    return message_obj.get('message')
-                                
-                                # Check if there are errors with useful information
-                                errors = message_obj.get('errors', [])
-                                if errors and len(errors) > 0:
-                                    error_msg = errors[0]
-                                    if "system error occurred" in error_msg.lower():
-                                        return "I'm sorry, I'm having trouble connecting to Salesforce right now."
-                                    else:
-                                        return f"I encountered an issue: {error_msg}"
-                                
-                                return "I'm sorry, I'm having trouble connecting to Salesforce right now."
-                            elif message_type == 'Text':
-                                response_text = message_obj.get('text', 'No response text')
-                                print(f"✅ Text response: {response_text}")
-                                return response_text
-                            else:
-                                # For any other type, try to get the message field
-                                response_text = message_obj.get('message', f'Received response type: {message_type}')
-                                print(f"✅ Other response type ({message_type}): {response_text}")
-                                return response_text
-                        else:
-                            print("❌ No messages in response array")
-                            return "No messages in response"
-                    else:
-                        print("❌ No message or messages field in response")
-                        return "No response message found"
-                elif response.status == 404:
-                    error_text = await response.text()
-                    print(f"❌ Einstein Agent API not available (404): {error_text}")
-                    return "I'm sorry, I'm having trouble connecting to Salesforce right now."
-                else:
-                    text = await response.text()
-                    print(f"❌ Salesforce call failed: {response.status} - {text}")
-                    return "I'm sorry, I'm having trouble connecting to Salesforce right now."
-                    
-    except Exception as e:
-        print(f"❌ Error calling Einstein Agent: {e}")
-        import traceback
-        traceback.print_exc()
-        return "I'm sorry, I encountered an error processing your request."
-
-async def get_salesforce_access_token():
-    """Get Salesforce access token using OAuth2 Client Credentials flow"""
-    try:
-        # Check if credentials are properly set
-        if not SALESFORCE_CLIENT_ID or not SALESFORCE_CLIENT_SECRET:
-            print("❌ Salesforce credentials not properly configured")
-            print(f"  - CLIENT_ID set: {bool(SALESFORCE_CLIENT_ID)}")
-            print(f"  - CLIENT_SECRET set: {bool(SALESFORCE_CLIENT_SECRET)}")
-            return None
-        
-        auth_url = f"{SALESFORCE_DOMAIN}/services/oauth2/token"
-        auth_data = {
-            'grant_type': 'client_credentials',
-            'client_id': SALESFORCE_CLIENT_ID,
-            'client_secret': SALESFORCE_CLIENT_SECRET
-        }
-        
-        print(f"🔧 Salesforce Auth Debug:")
-        print(f"  - Domain: {SALESFORCE_DOMAIN}")
-        print(f"  - Client ID: {SALESFORCE_CLIENT_ID[:20]}...")
-        print(f"  - Auth URL: {auth_url}")
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(auth_url, data=auth_data) as response:
-                print(f"🔧 Auth Response Status: {response.status}")
-                
-                if response.status == 200:
-                    result = await response.json()
-                    access_token = result["access_token"]
-                    print("✅ Successfully obtained Salesforce access token")
-                    print(f"  - Token: {access_token[:20]}...")
-                    print(f"  - Token length: {len(access_token)}")
-                    print(f"  - Full response: {json.dumps(result, indent=2)}")
-                    return access_token
-                else:
-                    error_text = await response.text()
-                    print(f"❌ Failed to get access token: {response.status} - {error_text}")
-                    print(f"  - Auth URL: {auth_url}")
-                    print(f"  - Client ID: {SALESFORCE_CLIENT_ID}")
-                    raise Exception(f"Failed to get Salesforce access token: {response.status} - {error_text}")
-    except Exception as e:
-        print(f"❌ Error getting Salesforce access token: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-async def get_salesforce_agents():
-    """Get list of available Einstein Agents from Salesforce"""
-    try:
-        access_token = await get_salesforce_access_token()
-        if not access_token:
-            return None
-        
-        headers = {
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
-        }
-        
-        # Use api.salesforce.com for getting agents
-        url = "https://api.salesforce.com/einstein/ai-agent/v1/agents"
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                print(f"🔧 Agents API Response Status: {response.status}")
-                
-                if response.status == 200:
-                    result = await response.json()
-                    print(f"✅ Found {len(result.get('agents', []))} agents")
-                    return result
-                else:
-                    error_text = await response.text()
-                    print(f"❌ Failed to get agents: {response.status} - {error_text}")
-                    return None
-                    
-    except Exception as e:
-        print(f"❌ Error getting Salesforce agents: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-@app.route('/')
-def health_check():
-    """Health check endpoint"""
-    # Don't automatically initialize LiveKit components in health check
-    # This prevents the error from occurring on every request
-    
-    return jsonify({
-        "status": "running",
-        "message": "Salesforce Voice Agent API with Einstein Agent and LiveKit is running",
-        "google_credentials": {
-            "available": google_creds_ok,
-            "path": os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "Not set"),
-            "local_file_exists": os.path.exists("google-credentials.json"),
-            "secret_file_exists": os.path.exists("/etc/secrets/google-credentials.json"),
-            "json_env_var": "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ
-        },
-        "livekit_components": {
-            "stt": stt_engine is not None,
-            "tts": tts_engine is not None,
-            "vad": vad_engine is not None,
-            "agent_session": agent_session is not None,
-            "agent": agent is not None,
-            "llm_engine": llm_engine is not None
-        },
-        "salesforce_domain": SALESFORCE_DOMAIN,
-        "agent_id": "dynamic (provided in requests)",
-        "livekit_url": os.environ.get("LIVEKIT_URL", "Not set"),
-        "endpoints": {
-            "health": "/",
-            "chat": "/api/chat",
-            "einstein_agent": "/api/einstein/agent",
-            "voice_process": "/api/voice/process",
-            "voice_stt": "/api/voice/stt",
-            "voice_tts": "/api/voice/tts"
-        }
-    })
-
-@app.route('/health')
-def health():
-    """Health endpoint for Render"""
-    return jsonify({"status": "healthy"})
-
-@app.route('/api/debug/credentials')
-def debug_credentials():
-    """Debug endpoint to check Google credentials setup"""
-    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "Not set")
-    
-    return jsonify({
-        "google_application_credentials": creds_path,
-        "file_exists": os.path.exists(creds_path) if creds_path != "Not set" else False,
-        "secret_file_exists": os.path.exists("/etc/secrets/google-credentials.json"),
-        "local_file_exists": os.path.exists("google-credentials.json"),
-        "json_env_var_exists": "GOOGLE_APPLICATION_CREDENTIALS_JSON" in os.environ,
-        "setup_result": google_creds_ok
-    })
-
-@app.route('/api/debug/salesforce')
-def debug_salesforce():
-    """Debug endpoint to check Salesforce credentials setup"""
-    return jsonify({
-        "salesforce_domain": SALESFORCE_DOMAIN,
-        "client_id_set": bool(SALESFORCE_CLIENT_ID),
-        "client_secret_set": bool(SALESFORCE_CLIENT_SECRET),
-        "client_id_value": SALESFORCE_CLIENT_ID[:20] + "..." if SALESFORCE_CLIENT_ID else None,
-        "client_secret_value": SALESFORCE_CLIENT_SECRET[:20] + "..." if SALESFORCE_CLIENT_SECRET else None,
-        "environment_variables": {
-            "SALESFORCE_ORG_DOMAIN": os.getenv("SALESFORCE_ORG_DOMAIN"),
-            "SALESFORCE_CLIENT_ID": "SET" if os.getenv("SALESFORCE_CLIENT_ID") else "NOT SET",
-            "SALESFORCE_CLIENT_SECRET": "SET" if os.getenv("SALESFORCE_CLIENT_SECRET") else "NOT SET"
-        }
-    })
-
-@app.route('/api/test/salesforce-auth')
-def test_salesforce_auth():
-    """Test endpoint to verify Salesforce authentication"""
-    try:
-        print("🔧 Testing Salesforce authentication...")
-        
-        # Test getting access token
-        access_token = asyncio.run(get_salesforce_access_token())
-        
-        if access_token:
-            return jsonify({
-                "success": True,
-                "message": "Salesforce authentication successful",
-                "access_token_preview": access_token[:20] + "...",
-                "token_length": len(access_token)
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "message": "Failed to get Salesforce access token",
-                "error": "Authentication failed"
-            })
-    except Exception as e:
-        print(f"❌ Error testing Salesforce auth: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "message": "Error testing Salesforce authentication",
-            "error": str(e)
-        })
-
-@app.route('/api/test/einstein-agent', methods=['POST'])
-def test_einstein_agent():
-    """Test endpoint to verify Einstein Agent API call"""
-    try:
-        data = request.get_json()
-        agent_id = data.get('agent_id', '0XxKj000001HwOrKAK')  # Default agent ID
-        test_message = data.get('message', 'Hello, this is a test message')
-        session_id = data.get('session_id', 'test_session_' + str(int(time.time())))
-        
-        print(f"🔧 Testing Einstein Agent with:")
-        print(f"  - Agent ID: {agent_id}")
-        print(f"  - Message: {test_message}")
-        print(f"  - Session ID: {session_id}")
-        
-        # Call Einstein Agent
-        result = asyncio.run(call_einstein_agent(test_message, session_id, agent_id))
-        
-        return jsonify({
-            "success": True,
-            "message": "Einstein Agent test completed",
-            "agent_id": agent_id,
-            "session_id": session_id,
-            "test_message": test_message,
-            "agent_response": result,
-            "response_type": type(result).__name__
-        })
-        
-    except Exception as e:
-        print(f"❌ Error testing Einstein Agent: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "message": "Error testing Einstein Agent",
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        })
-
-@app.route('/api/test/complete-flow', methods=['POST'])
-def test_complete_flow():
-    """Test the complete flow: Einstein Agent + TTS"""
-    try:
-        data = request.get_json()
-        agent_id = data.get('agent_id', '0XxKj000001HwOrKAK')
-        test_message = data.get('message', 'Hello, this is a complete flow test')
-        session_id = data.get('session_id', 'complete_test_' + str(int(time.time())))
-        
-        print(f"🔧 Testing complete flow:")
-        print(f"  - Agent ID: {agent_id}")
-        print(f"  - Message: {test_message}")
-        print(f"  - Session ID: {session_id}")
-        
-        # Step 1: Call Einstein Agent
-        print("🔧 Step 1: Calling Einstein Agent...")
-        agent_response = asyncio.run(call_einstein_agent(test_message, session_id, agent_id))
-        print(f"✅ Einstein Agent response: {agent_response}")
-        
-        # Step 2: Initialize LiveKit components if needed
-        print("🔧 Step 2: Initializing LiveKit components...")
-        if not tts_engine:
-            init_result = initialize_livekit_components()
-            if not init_result:
-                return jsonify({
-                    "success": False,
-                    "message": "Failed to initialize LiveKit components",
-                    "step": "livekit_init"
-                })
-        
-        # Step 3: Generate TTS
-        print("🔧 Step 3: Generating TTS...")
-        tts_audio = process_text_with_tts_sync(agent_response)
-        
-        if tts_audio:
-            print(f"✅ TTS generated: {len(tts_audio)} characters")
-            return jsonify({
-                "success": True,
-                "message": "Complete flow test successful",
-                "agent_id": agent_id,
-                "session_id": session_id,
-                "test_message": test_message,
-                "agent_response": agent_response,
-                "tts_generated": True,
-                "tts_audio_length": len(tts_audio),
-                "tts_audio_preview": tts_audio[:100] + "..." if len(tts_audio) > 100 else tts_audio
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "message": "TTS generation failed",
-                "step": "tts_generation",
-                "agent_response": agent_response
-            })
-            
-    except Exception as e:
-        print(f"❌ Error in complete flow test: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "message": "Error in complete flow test",
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        })
-
-@app.route('/api/salesforce/agents')
-def list_salesforce_agents():
-    """List available Einstein Agents from Salesforce"""
-    try:
-        print("🔧 Listing Salesforce agents...")
-        agents = asyncio.run(get_salesforce_agents())
-        
-        if agents:
-            return jsonify({
-                "success": True,
-                "message": "Successfully retrieved agents",
-                "agents": agents.get('agents', []),
-                "total_count": len(agents.get('agents', []))
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "message": "Failed to retrieve agents",
-                "agents": [],
-                "total_count": 0
-            })
-            
-    except Exception as e:
-        print(f"❌ Error listing agents: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "message": "Error listing agents",
-            "error": str(e),
-            "agents": [],
-            "total_count": 0
-        })
-
-@app.route('/api/debug/sessions')
-def debug_sessions():
-    """Debug endpoint to view active sessions"""
-    global session_cache
-    return jsonify({
-        "active_sessions": len(session_cache),
-        "sessions": session_cache,
-        "cache_keys": list(session_cache.keys())
-    })
-
-@app.route('/api/debug/init-livekit')
-def debug_init_livekit():
-    """Debug endpoint to manually initialize LiveKit components"""
-    try:
-        print("🔧 Manual LiveKit initialization requested...")
-        print("🔧 Current Google credentials status:")
-        print(f"  - GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
-        print(f"  - File exists: {os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', ''))}")
-        print(f"  - Google creds OK: {google_creds_ok}")
-        
-        result = initialize_livekit_components()
-        print(f"🔧 Manual LiveKit initialization result: {result}")
-        
-        return jsonify({
-            "success": result,
-            "stt_engine": stt_engine is not None,
-            "tts_engine": tts_engine is not None,
-            "vad_engine": vad_engine is not None,
-            "agent_session": agent_session is not None,
-            "agent": agent is not None,
-            "llm_engine": llm_engine is not None,
-            "google_credentials_path": os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'),
-            "google_credentials_file_exists": os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', '')),
-            "google_creds_ok": google_creds_ok
-        })
-    except Exception as e:
-        print(f"❌ Manual LiveKit initialization failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-            "google_credentials_path": os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'),
-            "google_credentials_file_exists": os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', '')),
-            "google_creds_ok": google_creds_ok
-        })
-
-@app.route('/api/chat', methods=['POST'])
-def chat():
-    """Chat endpoint for text-based conversations"""
-    try:
-        data = request.get_json()
-        message = data.get('message', '')
-        agent_id = data.get('agent_id')
-        session_id = data.get('session_id', str(uuid.uuid4()))
-        
-        if not agent_id:
-            return jsonify({"error": "Agent ID is required"}), 400
-        
-        # Call Einstein Agent
-        result = asyncio.run(call_einstein_agent(message, session_id, agent_id))
-        
-        return jsonify({
-            "response": result,
-            "session_id": session_id,
-            "agent_id": agent_id
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/einstein/agent', methods=['POST'])
-def einstein_agent():
-    """Einstein Agent endpoint"""
-    try:
-        print("=== EINSTEIN AGENT API CALLED ===")
-        
-        # Clear expired sessions and TTS cache before processing
-        clear_expired_sessions()
-        clear_tts_cache()
-        
-        data = request.get_json()
-        print("Request data:", json.dumps(data, indent=2))
-        
-        message = data.get('message', '')
-        agent_id = data.get('agent_id')
-        session_id = data.get('session_id', str(uuid.uuid4()))
-        
-        print(f"Message: {message}")
-        print(f"Session ID: {session_id}")
-        print(f"Agent ID: {agent_id}")
-        
-        if not agent_id:
-            print("❌ Error: Agent ID is required")
-            return jsonify({"error": "Agent ID is required"}), 400
-        
-        print(f"✅ Calling Einstein Agent with ID: {agent_id}")
-        
-        # Call Einstein Agent
-        result = asyncio.run(call_einstein_agent(message, session_id, agent_id))
-        
-        print(f"✅ Einstein Agent response: {result}")
-        
-        response_data = {
-            "response": result,
-            "message": result,  # Add message field for LWC compatibility
-            "session_id": session_id,
-            "agent_id": agent_id
-        }
-        
-        print("Response data:", json.dumps(response_data, indent=2))
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        print(f"❌ Error in Einstein Agent API: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/voice/process', methods=['POST'])
-def process_voice():
-    """Process voice input with STT, Einstein Agent, and TTS"""
-    try:
-        data = request.get_json()
-        audio_data = data.get('audio_data')
-        agent_id = data.get('agent_id')
-        session_id = data.get('session_id', str(uuid.uuid4()))
-        
-        if not agent_id:
-            return jsonify({"error": "Agent ID is required"}), 400
-        
-        # Initialize LiveKit components if not already done
-        if not stt_engine or not tts_engine:
-            result = initialize_livekit_components()
-            if not result:
-                return jsonify({"error": "Failed to initialize LiveKit components"}), 500
-        
-        # Process voice with STT
-        # Note: This is a simplified example - actual implementation would process audio data
-        text = "Voice input processed"  # Placeholder for actual STT processing
-        
-        # Call Einstein Agent
-        response = asyncio.run(call_einstein_agent(text, session_id, agent_id))
-        
-        # Process response with TTS
-        # Note: This is a simplified example - actual implementation would generate audio
-        audio_response = "Audio response generated"  # Placeholder for actual TTS processing
-        
-        return jsonify({
-            "text": text,
-            "response": response,
-            "audio_response": audio_response,
-            "session_id": session_id,
-            "agent_id": agent_id
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-def preprocess_text_for_tts(text):
-    """Preprocess text to fix common TTS pronunciation issues"""
-    import re
-    
-    # Replace numbers with words
-    number_words = {
-        '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
-        '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine'
-    }
-    
-    # Replace single digits
-    for digit, word in number_words.items():
-        text = re.sub(r'\b' + digit + r'\b', word, text)
-    
-    # Replace common patterns
-    text = re.sub(r'(\d+)\s*:', r'\1 colon', text)  # "1:" -> "1 colon"
-    text = re.sub(r'(\d+)\s*\.', r'\1 dot', text)  # "1." -> "1 dot"
-    text = re.sub(r'(\d+)\s*\)', r'\1 close parenthesis', text)  # "1)" -> "1 close parenthesis"
-    
-    # Replace case numbers like "000 1111" with "zero zero zero one one one one"
-    text = re.sub(r'(\d)\s*(\d)', r'\1 \2', text)  # Add spaces between digits
-    for digit, word in number_words.items():
-        text = text.replace(digit, word)
-    
-    # Fix common abbreviations
-    text = re.sub(r'\bAPI\b', 'A P I', text)
-    text = re.sub(r'\bURL\b', 'U R L', text)
-    text = re.sub(r'\bID\b', 'I D', text)
-    
-    return text
-
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
-    """TTS processing using LiveKit AgentSession.say() approach - exactly like working code"""
-    global tts_cache
-    
-    print("🔧 process_text_with_tts_sync FUNCTION CALLED")
-    
+    """Synchronous wrapper for TTS processing using subprocess"""
     try:
-        print(f"🔧 Processing TTS for text: {text[:50]}...")
-        print(f"Language: {language}, Voice: {voice}")
-        print(f"🔧 AgentSession available: {agent_session is not None}")
-        print(f"🔧 TTS engine available: {tts_engine is not None}")
+        print("🔧 process_text_with_tts_sync FUNCTION CALLED")
+        print(f"🔧 Text: {text[:50]}...")
+        print(f"🔧 Language: {language}, Voice: {voice}")
         
-        if not agent_session:
-            print("❌ LiveKit AgentSession not available")
-            return None
-        
-        # Check cache first
-        cache_key = f"{text}_{language}_{voice}"
-        if cache_key in tts_cache:
-            print("✅ Using cached TTS audio")
-            return tts_cache[cache_key]
-        
-        # Preprocess text to fix TTS pronunciation issues
-        processed_text = preprocess_text_for_tts(text)
-        print(f"🔧 Processed text for TTS: {processed_text[:50]}...")
-        
-        # Use LiveKit AgentSession.say() approach - exactly like working code
+        # Create temporary file with text
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
+            temp_file.write(text)
+            temp_file_path = temp_file.name
+
         try:
-            print("🔧 Using LiveKit AgentSession.say() approach...")
-            
-            import asyncio
-            import threading
-            import queue
-            
-            result_queue = queue.Queue()
-            exception_queue = queue.Queue()
-            
-            def run_livekit_session_say():
-                try:
-                    # Create new event loop for this thread
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    # Run the LiveKit session.say() function
-                    result = loop.run_until_complete(process_text_with_livekit_session_say(processed_text, language, voice))
-                    result_queue.put(result)
-                    
-                except Exception as e:
-                    print(f"❌ LiveKit session.say() thread error: {e}")
-                    exception_queue.put(e)
-                    import traceback
-                    traceback.print_exc()
-                finally:
-                    try:
-                        loop.close()
-                    except:
-                        pass
-            
-            # Start the thread
-            tts_thread = threading.Thread(target=run_livekit_session_say)
-            tts_thread.start()
-            
-            # Wait for completion
-            tts_thread.join(timeout=30)
-            
-            if tts_thread.is_alive():
-                print("❌ LiveKit session.say() processing timed out")
-                return None
-            
-            # Check for exceptions
-            if not exception_queue.empty():
-                exception = exception_queue.get()
-                print(f"❌ LiveKit session.say() processing failed: {exception}")
-                return None
-            
-            # Get result
-            if not result_queue.empty():
-                result = result_queue.get()
-                if result:
-                    # Cache the result
-                    tts_cache[cache_key] = result
-                    print(f"✅ LiveKit session.say() processing completed successfully and cached")
-                    return result
+            # Create a simple TTS script
+            tts_script = f"""
+import os
+import sys
+import json
+import base64
+import tempfile
+import asyncio
+from livekit.plugins import google
+
+# Set up Google credentials
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "{os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}"
+
+async def generate_tts():
+   try:
+       # Initialize TTS engine
+       tts_engine = google.TTS()
+       
+       # Read text from file
+       with open('{temp_file_path}', 'r') as f:
+           text = f.read()
+       
+       print(f"Processing text: {{text[:50]}}...")
+       
+       # Generate audio
+       audio_stream = tts_engine.synthesize(text=text)
+       
+       audio_chunks = []
+       try:
+           # Try async iteration first
+           async for chunk in audio_stream:
+               if hasattr(chunk, 'frame') and chunk.frame:
+                   audio_data = chunk.frame.data
+                   audio_chunks.append(audio_data)
+                   print(f"Collected chunk: {{len(audio_data)}} bytes")
+       except:
+           # Fallback to sync iteration
+           for chunk in audio_stream:
+               if hasattr(chunk, 'frame') and chunk.frame:
+                   audio_data = chunk.frame.data
+                   audio_chunks.append(audio_data)
+                   print(f"Collected chunk: {{len(audio_data)}} bytes")
+       
+       if not audio_chunks:
+           print("No audio chunks collected")
+           return None
+       
+       # Combine audio data
+       full_audio_bytes = b"".join(audio_chunks)
+       print(f"Total audio bytes: {{len(full_audio_bytes)}}")
+       
+       # Create WAV file
+       wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
+           b'RIFF', 36 + len(full_audio_bytes), b'WAVE', b'fmt ', 16, 1,
+           1, 24000, 24000 * 1 * 16 // 8, 1 * 16 // 8, 16, b'data', len(full_audio_bytes)
+       )
+       wav_audio = wav_header + full_audio_bytes
+       
+       # Convert to base64
+       audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
+       print(f"WAV audio created: {{len(wav_audio)}} bytes")
+       
+       return audio_base64
+       
+   except Exception as e:
+       print(f"Error in TTS: {{e}}")
+       import traceback
+       traceback.print_exc()
+       return None
+
+if __name__ == "__main__":
+   import struct
+   result = asyncio.run(generate_tts())
+   if result:
+       print("SUCCESS:" + result)
+   else:
+       print("FAILED")
+"""
+
+            # Write script to temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
+                script_file.write(tts_script)
+                script_path = script_file.name
+
+            try:
+                # Run the script
+                print("🔧 Running TTS subprocess...")
+                result = subprocess.run(
+                    [sys.executable, script_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False
+                )
+
+                print(f"🔧 Subprocess return code: {result.returncode}")
+                print(f"🔧 Subprocess stdout: {result.stdout}")
+                print(f"🔧 Subprocess stderr: {result.stderr}")
+
+                if result.returncode == 0 and "SUCCESS:" in result.stdout:
+                    # Extract the base64 audio data
+                    audio_base64 = result.stdout.split("SUCCESS:")[1].strip()
+                    print("✅ TTS subprocess completed successfully")
+                    print(f"✅ Audio data length: {len(audio_base64)} characters")
+                    return audio_base64
                 else:
-                    print("❌ No result from LiveKit session.say() processing")
+                    print("❌ TTS subprocess failed")
                     return None
-            else:
-                print("❌ No result from LiveKit session.say() processing")
-                return None
-                
+
+            finally:
+                # Clean up temporary files
+                try:
+                    os.unlink(script_path)
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+
         except Exception as e:
-            print(f"❌ Error in LiveKit session.say() processing: {e}")
+            print(f"❌ Error in TTS subprocess: {e}")
             import traceback
             traceback.print_exc()
             return None
-            
+
     except Exception as e:
         print(f"❌ Error in process_text_with_tts_sync: {e}")
-        logger.error(f"Error in process_text_with_tts_sync: {e}")
+        logger.error("Error in process_text_with_tts_sync: %s", e)
         import traceback
         traceback.print_exc()
         return None
 
-
-async def process_text_with_livekit_session_say(text, language='en-US', voice='en-US-Wavenet-A'):
-    """TTS processing using official LiveKit AgentSession.say() approach"""
-    try:
-        print(f"🔧 LiveKit AgentSession.say() processing for text: {text[:50]}...")
-        print(f"🔧 Language: {language}, Voice: {voice}")
-        print(f"🔧 AgentSession available: {agent_session is not None}")
-        
-        if not agent_session:
-            print("❌ LiveKit AgentSession not available")
-            return None
-        
-        # According to LiveKit docs, we should use AgentSession.say() for speech
-        # But for API responses, we need to generate audio data
-        # So we'll use the TTS engine directly with proper voice configuration
-        
-        # Use cached TTS engine or create new one for the voice - efficient approach
-        voice_key = f"{language}_{voice}"
-        if voice_key in tts_engine_cache:
-            print(f"🔧 Using cached TTS engine for voice: {voice}")
-            voice_tts_engine = tts_engine_cache[voice_key]
-        else:
-            print(f"🔧 Creating new TTS engine for voice: {voice}")
-            voice_tts_engine = google.TTS(
-                voice=google.Voice(
-                    language=language,
-                    name=voice
-                )
-            )
-            # Cache the TTS engine for future use
-            tts_engine_cache[voice_key] = voice_tts_engine
-            print(f"✅ TTS engine cached for voice: {voice}")
-        
-        # Use the TTS engine to generate audio data - this uses LiveKit's TTS
-        audio_stream = voice_tts_engine.synthesize(text=text)
-        print(f"🔧 Audio stream created: {audio_stream}")
-        
-        audio_chunks = []
-        chunk_count = 0
-        
-        # Collect audio chunks
-        print("🔧 Collecting audio chunks...")
-        async for chunk in audio_stream:
-            chunk_count += 1
-            print(f"🔧 Processing chunk {chunk_count}: {type(chunk)}")
-            
-            if hasattr(chunk, 'frame') and chunk.frame:
-                audio_data = chunk.frame.data
-                audio_chunks.append(audio_data)
-                print(f"🔧 Collected audio chunk {chunk_count}: {len(audio_data)} bytes")
-            elif hasattr(chunk, 'data'):
-                audio_data = chunk.data
-                audio_chunks.append(audio_data)
-                print(f"🔧 Collected audio chunk {chunk_count} (data): {len(audio_data)} bytes")
-            else:
-                print(f"🔧 Chunk {chunk_count} has no frame or data: {dir(chunk)}")
-        
-        print(f"🔧 Total chunks collected: {chunk_count}")
-        print(f"🔧 Audio chunks list length: {len(audio_chunks)}")
-        
-        if not audio_chunks:
-            print("❌ No audio chunks collected")
-            return None
-            
-        full_audio_bytes = b"".join(audio_chunks)
-        print(f"✅ Total audio bytes collected: {len(full_audio_bytes)}")
-        
-        if len(full_audio_bytes) == 0:
-            print("❌ Empty audio data")
-            return None
-        
-        # Convert to WAV format
-        print("🔧 Creating WAV file...")
-        wav_audio = create_wav_file(full_audio_bytes)
-        print(f"🔧 WAV file created: {len(wav_audio)} bytes")
-        
-        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
-        print(f"✅ WAV audio created: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
-        return audio_base64
-        
-    except Exception as e:
-        print(f"❌ Error in process_text_with_livekit_session_say: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-async def process_text_with_tts_async(text, language='en-US', voice='en-US-Wavenet-A'):
-    """TTS processing exactly matching the working code"""
+async def process_text_with_tts_async(text, language='en-US', voice='en-US-Wavenet-A'):  # pylint: disable=unused-argument
+    """Async TTS processing using LiveKit directly"""
     try:
         print(f"🔧 Async TTS processing for text: {text[:50]}...")
-        print(f"🔧 TTS engine available: {tts_engine is not None}")
-        
+
         if not tts_engine:
             print("❌ TTS engine not available in async function")
             return None
-        
-        # Process text using LiveKit TTS directly - exactly like working code
-        print("🔧 Calling tts_engine.synthesize...")
+
+        # Process text using LiveKit TTS directly
         audio_stream = tts_engine.synthesize(text=text)
-        print(f"🔧 Audio stream created: {audio_stream}")
-        
+
         audio_chunks = []
-        chunk_count = 0
-        
-        # Simple iteration exactly like working code
-        print("🔧 Collecting audio chunks...")
+
+        # Try different approaches to get audio data
         try:
-            async for chunk in audio_stream:
-                chunk_count += 1
-                print(f"🔧 Processing chunk {chunk_count}: {type(chunk)}")
-                
-                if hasattr(chunk, 'frame') and chunk.frame:
-                    audio_data = chunk.frame.data
-                    audio_chunks.append(audio_data)
-                    print(f"🔧 Collected audio chunk {chunk_count}: {len(audio_data)} bytes")
-                elif hasattr(chunk, 'data'):
-                    audio_data = chunk.data
-                    audio_chunks.append(audio_data)
-                    print(f"🔧 Collected audio chunk {chunk_count} (data): {len(audio_data)} bytes")
-                else:
-                    print(f"🔧 Chunk {chunk_count} has no frame or data: {dir(chunk)}")
+            # Method 1: Try async iteration with timeout
+            print("🔧 Trying async iteration with timeout...")
+
+            async def collect_audio_chunks():
+                async for chunk in audio_stream:
+                    if hasattr(chunk, 'frame') and chunk.frame:
+                        audio_data = chunk.frame.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
+                    elif hasattr(chunk, 'data'):
+                        audio_data = chunk.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
+
+            # Run with timeout
+            await asyncio.wait_for(collect_audio_chunks(), timeout=25.0)
+
+        except asyncio.TimeoutError:
+            print("❌ Async iteration timed out after 25 seconds")
         except Exception as e:
-            print(f"❌ Error during audio chunk collection: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ Async iteration failed: {e}")
+
+        # Method 2: Try synchronous iteration
+        try:
+            print("🔧 Trying synchronous iteration...")
+            if hasattr(audio_stream, '__iter__') and not asyncio.iscoroutine(audio_stream):
+                for chunk in audio_stream:
+                    if hasattr(chunk, 'frame') and chunk.frame:
+                        audio_data = chunk.frame.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
+                    elif hasattr(chunk, 'data'):
+                        audio_data = chunk.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
+        except Exception as e2:
+            print(f"❌ Synchronous iteration also failed: {e2}")
+
+        # Method 3: Try to get all data at once
+        try:
+            print("🔧 Trying to get all data at once...")
+            if hasattr(audio_stream, '__iter__'):
+                all_data = list(audio_stream)
+                print(f"🔧 Got {len(all_data)} items from stream")
+                for item in all_data:
+                    if hasattr(item, 'frame') and item.frame:
+                        audio_data = item.frame.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
+                    elif hasattr(item, 'data'):
+                        audio_data = item.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
+        except Exception as e3:
+            print(f"❌ All methods failed: {e3}")
             return None
-        
-        print(f"🔧 Total chunks collected: {chunk_count}")
-        print(f"🔧 Audio chunks list length: {len(audio_chunks)}")
-        
+
         if not audio_chunks:
             print("❌ No audio chunks collected")
             return None
-            
+
         full_audio_bytes = b"".join(audio_chunks)
         print(f"✅ Total audio bytes collected: {len(full_audio_bytes)}")
-        
-        if len(full_audio_bytes) == 0:
-            print("❌ Empty audio data")
-            return None
-        
-        # Convert to WAV format exactly like working code
-        print("🔧 Creating WAV file...")
+
+        # Convert to WAV format
         wav_audio = create_wav_file(full_audio_bytes)
-        print(f"🔧 WAV file created: {len(wav_audio)} bytes")
-        
         audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
+
         print(f"✅ WAV audio created: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
         return audio_base64
-        
+
     except Exception as e:
         print(f"❌ Error in process_text_with_tts_async: {e}")
         import traceback
@@ -1349,13 +274,175 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
 def create_wav_file(audio_data, sample_rate=24000, channels=1, bits_per_sample=16):
     """Create WAV file from raw audio data"""
     import struct
-    
+
     wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
         b'RIFF', 36 + len(audio_data), b'WAVE', b'fmt ', 16, 1,
         channels, sample_rate, sample_rate * channels * bits_per_sample // 8,
         channels * bits_per_sample // 8, bits_per_sample, b'data', len(audio_data)
     )
     return wav_header + audio_data
+
+def setup_google_credentials():
+    """Setup Google credentials for TTS and STT"""
+    try:
+        print("🔧 Setting up Google credentials...")
+        print("🔧 Starting Google credentials setup...")
+        
+        # Check for secret file first
+        secret_file = "/etc/secrets/google-credentials.json"
+        if os.path.exists(secret_file):
+            print(f"🔧 Checking secret file: {secret_file}")
+            print(f"✅ Secret file found: {secret_file}")
+            
+            # Read and fix the private key format
+            with open(secret_file, 'r', encoding='utf-8') as f:
+                creds_data = json.load(f)
+            
+            # Fix private key format if needed
+            if 'private_key' in creds_data and creds_data['private_key']:
+                creds_data['private_key'] = creds_data['private_key'].replace('\\n', '\n')
+            
+            # Write to temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+                json.dump(creds_data, temp_file)
+                temp_creds_file = temp_file.name
+            
+            print(f"✅ Fixed private key format and set credentials: {temp_creds_file}")
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds_file
+            print(f"✅ Environment variable set to: {temp_creds_file}")
+            print("🔧 Google credentials setup result: True")
+            return True
+        else:
+            print(f"❌ Secret file not found: {secret_file}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error setting up Google credentials: {e}")
+        return False
+
+def initialize_livekit_components():
+    """Initialize LiveKit components"""
+    global stt_engine, tts_engine, vad_engine, agent_session, agent
+    
+    try:
+        print("🔧 Initializing LiveKit components...")
+        print(f"🔧 TTS engine available: {tts_engine is not None}")
+        print(f"🔧 Agent session available: {agent_session is not None}")
+        
+        # Setup Google credentials
+        if not setup_google_credentials():
+            print("❌ Failed to setup Google credentials")
+            return False
+        
+        # Initialize STT engine
+        try:
+            print("🔧 Initializing STT engine...")
+            stt_engine = google.STT()
+            print("✅ STT engine initialized successfully")
+        except Exception as e:
+            print(f"❌ Failed to initialize STT engine: {e}")
+            return False
+        
+        # Initialize TTS engine with default voice
+        try:
+            print("🔧 Initializing TTS engine...")
+            tts_engine = google.TTS()
+            print("✅ TTS engine initialized successfully")
+        except Exception as e:
+            print(f"❌ Failed to initialize TTS engine: {e}")
+            return False
+        
+        # VAD (Voice Activity Detection) is not available in current LiveKit version
+        print("🔧 Skipping VAD initialization (not available in current LiveKit version)")
+        vad_engine = None
+        
+        # Create AgentSession with STT and TTS
+        try:
+            print("🔧 Creating AgentSession...")
+            agent_session = AgentSession(
+                stt=stt_engine,
+                tts=tts_engine,
+            )
+            print("✅ AgentSession created successfully")
+        except Exception as e:
+            print(f"❌ Failed to create AgentSession: {e}")
+            return False
+        
+        # Create Agent
+        try:
+            print("🔧 Creating Agent...")
+            agent = Agent(
+                instructions="You are a helpful Salesforce voice assistant. Provide clear and concise responses.",
+                stt=stt_engine,
+                tts=tts_engine
+            )
+            print("✅ Agent created successfully")
+        except Exception as e:
+            print(f"❌ Failed to create Agent: {e}")
+            return False
+        
+        print("✅ All LiveKit components initialized successfully")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error initializing LiveKit components: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+# Initialize components on startup
+print("🔧 Starting Flask API initialization...")
+initialize_livekit_components()
+
+@app.route('/', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy",
+        "message": "LiveKit Voice Agent API is running",
+        "components": {
+            "stt_engine": stt_engine is not None,
+            "tts_engine": tts_engine is not None,
+            "agent_session": agent_session is not None,
+            "agent": agent is not None
+        }
+    })
+
+@app.route('/api/einstein/agent', methods=['POST'])
+def einstein_agent():
+    """Salesforce Einstein Agent endpoint"""
+    try:
+        print("=== EINSTEIN AGENT API CALLED ===")
+        data = request.get_json()
+        print("Einstein request data:", json.dumps(data, indent=2))
+        
+        message = data.get('message', '')
+        session_id = data.get('session_id', '')
+        agent_id = data.get('agent_id', 'agent_001')
+        
+        print(f"Message: {message}")
+        print(f"Session ID: {session_id}")
+        print(f"Agent ID: {agent_id}")
+        
+        if not message:
+            return jsonify({"error": "Message is required"}), 400
+        
+        # Simulate Salesforce Einstein Agent response
+        # In a real implementation, this would call the actual Salesforce Einstein API
+        response_message = f"I'm sorry, I'm having trouble connecting to Salesforce right now. Your message was: '{message}'. Please try again later."
+        
+        return jsonify({
+            "message": response_message,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Error in Einstein Agent: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 
@@ -1364,18 +451,18 @@ def speech_to_text():
     """Speech-to-Text endpoint"""
     try:
         data = request.get_json()
-        audio_data = data.get('audio_data')
-        
+        # audio_data = data.get('audio_data')  # Will be used in actual STT implementation
+
         # Initialize LiveKit components if not already done
         if not stt_engine:
             result = initialize_livekit_components()
             if not result:
                 return jsonify({"error": "Failed to initialize LiveKit components"}), 500
-        
+
         # Process audio with STT
         # Note: This is a simplified example - actual implementation would process audio data
         text = "Speech converted to text"  # Placeholder for actual STT processing
-        
+
         return jsonify({
             "text": text
         })
@@ -1389,24 +476,19 @@ def text_to_speech():
         print("=== TTS API CALLED ===")
         data = request.get_json()
         print("TTS request data:", json.dumps(data, indent=2))
-        
+
         text = data.get('text', '')
         language = data.get('language', 'en-US')
         voice = data.get('voice', 'en-US-Wavenet-A')
-        
+
         print(f"Text: {text}")
         print(f"Language: {language}")
         print(f"Voice: {voice}")
-        
+
         if not text:
             print("❌ Error: Text is required")
             return jsonify({"error": "Text is required"}), 400
-        
-        print("🔧 TTS endpoint reached successfully")
-        
-        print(f"🔧 TTS engine check: {tts_engine is not None}")
-        print(f"🔧 AgentSession check: {agent_session is not None}")
-        
+
         # Initialize LiveKit components if not already done
         if not tts_engine:
             print("🔧 Initializing LiveKit components for TTS...")
@@ -1414,22 +496,14 @@ def text_to_speech():
             if not result:
                 print("❌ Failed to initialize LiveKit components")
                 return jsonify({"error": "Failed to initialize LiveKit components"}), 500
-        
+
         print("✅ TTS engine available, processing...")
-        print(f"🔧 AgentSession available: {agent_session is not None}")
-        print(f"🔧 TTS engine available: {tts_engine is not None}")
-        
+
         # Process text with TTS using synchronous wrapper
-        print("🔧 About to call process_text_with_tts_sync...")
         audio_content = process_text_with_tts_sync(text, language, voice)
-        print(f"🔧 process_text_with_tts_sync returned: {type(audio_content)}")
-        
+
         print(f"✅ TTS generated, audio length: {len(audio_content) if audio_content else 'null'}")
-        
-        if audio_content is None:
-            print("❌ TTS returned None - no audio generated")
-            return jsonify({"error": "Failed to generate audio"}), 500
-        
+
         response_data = {
             "audio_content": audio_content,
             "audio_data": audio_content,  # For backward compatibility
@@ -1437,11 +511,11 @@ def text_to_speech():
             "language": language,
             "voice": voice
         }
-        
+
         print("TTS response data:", json.dumps({**response_data, "audio_content": f"[{len(audio_content) if audio_content else 0} bytes]"}, indent=2))
-        
+
         return jsonify(response_data)
-        
+
     except Exception as e:
         print(f"❌ Error in TTS: {e}")
         import traceback
@@ -1449,4 +523,6 @@ def text_to_speech():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)), debug=False)
+    print("🔧 Starting Flask API server...")
+    print("🔧 Flask API will run on port 10000")
+    app.run(host='0.0.0.0', port=10000, debug=False)
