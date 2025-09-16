@@ -277,6 +277,7 @@ def initialize_livekit_components():
                 )
             
             # Run AgentSession creation in a separate thread with its own event loop
+            global agent_session
             agent_session = create_agent_session()
             print("✅ AgentSession created successfully")
         except Exception as e:
@@ -286,6 +287,7 @@ def initialize_livekit_components():
         # Create Agent
         try:
             print("🔧 Creating Agent...")
+            global agent
             agent = Agent(
                 instructions="You are a helpful Salesforce voice assistant. Help users with their Salesforce cases and questions. Always provide helpful and engaging responses."
             )
@@ -1084,6 +1086,8 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
     try:
         print(f"🔧 Processing TTS for text: {text[:50]}...")
         print(f"Language: {language}, Voice: {voice}")
+        print(f"🔧 AgentSession available: {agent_session is not None}")
+        print(f"🔧 TTS engine available: {tts_engine is not None}")
         
         if not agent_session:
             print("❌ LiveKit AgentSession not available")
@@ -1438,6 +1442,8 @@ def text_to_speech():
                 return jsonify({"error": "Failed to initialize LiveKit components"}), 500
         
         print("✅ TTS engine available, processing...")
+        print(f"🔧 AgentSession available: {agent_session is not None}")
+        print(f"🔧 TTS engine available: {tts_engine is not None}")
         
         # Process text with TTS using synchronous wrapper
         audio_content = process_text_with_tts_sync(text, language, voice)
