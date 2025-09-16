@@ -47,12 +47,21 @@ salesforce_token_cache = {}
 salesforce_session_cache = {}
 
 def preprocess_text_for_tts(text):
-    """Preprocess text to improve TTS pronunciation"""
+    """Preprocess text to make TTS sound more natural and human-like"""
     if not text:
         return text
     
-    # Replace numbers with their spoken equivalents
-    replacements = {
+    # Make text more conversational and natural
+    processed_text = text
+    
+    # Add natural pauses and emphasis for better flow
+    processed_text = processed_text.replace('.', '. ')  # Pause after periods
+    processed_text = processed_text.replace('!', '! ')  # Pause after exclamations
+    processed_text = processed_text.replace('?', '? ')  # Pause after questions
+    processed_text = processed_text.replace(',', ', ')  # Pause after commas
+    
+    # Replace numbers with their spoken equivalents (but keep some context)
+    number_replacements = {
         '0': 'zero',
         '1': 'one',
         '2': 'two',
@@ -62,50 +71,42 @@ def preprocess_text_for_tts(text):
         '6': 'six',
         '7': 'seven',
         '8': 'eight',
-        '9': 'nine',
-        # Add more replacements as needed
-        '&': 'and',
-        '@': 'at',
-        '#': 'hash',
-        '$': 'dollar',
-        '%': 'percent',
-        '+': 'plus',
-        '=': 'equals',
-        '<': 'less than',
-        '>': 'greater than',
-        '|': 'pipe',
-        '\\': 'backslash',
-        '/': 'slash',
-        '*': 'asterisk',
-        '^': 'caret',
-        '~': 'tilde',
-        '`': 'backtick',
-        '[': 'left bracket',
-        ']': 'right bracket',
-        '{': 'left brace',
-        '}': 'right brace',
-        '(': 'left parenthesis',
-        ')': 'right parenthesis',
-        '!': 'exclamation mark',
-        '?': 'question mark',
-        '.': 'period',
-        ',': 'comma',
-        ';': 'semicolon',
-        ':': 'colon',
-        '"': 'quote',
-        "'": 'apostrophe',
-        '-': 'dash',
-        '_': 'underscore'
+        '9': 'nine'
     }
     
-    processed_text = text
-    for char, replacement in replacements.items():
-        processed_text = processed_text.replace(char, f' {replacement} ')
+    # Only replace standalone numbers, not in words
+    import re
+    for digit, word in number_replacements.items():
+        # Replace digits that are not part of words
+        processed_text = re.sub(r'\b' + digit + r'\b', word, processed_text)
+    
+    # Add natural speech patterns
+    processed_text = processed_text.replace('I am', "I'm")
+    processed_text = processed_text.replace('I will', "I'll")
+    processed_text = processed_text.replace('I have', "I've")
+    processed_text = processed_text.replace('I would', "I'd")
+    processed_text = processed_text.replace('I can', "I can")
+    processed_text = processed_text.replace('I cannot', "I can't")
+    processed_text = processed_text.replace('do not', "don't")
+    processed_text = processed_text.replace('does not', "doesn't")
+    processed_text = processed_text.replace('will not', "won't")
+    processed_text = processed_text.replace('cannot', "can't")
+    processed_text = processed_text.replace('should not', "shouldn't")
+    processed_text = processed_text.replace('would not', "wouldn't")
+    processed_text = processed_text.replace('could not', "couldn't")
+    
+    # Add natural emphasis for important words
+    emphasis_words = ['important', 'urgent', 'critical', 'error', 'success', 'warning', 'note']
+    for word in emphasis_words:
+        if word in processed_text.lower():
+            processed_text = processed_text.replace(word, f"<emphasis level='strong'>{word}</emphasis>")
+            processed_text = processed_text.replace(word.title(), f"<emphasis level='strong'>{word.title()}</emphasis>")
+            processed_text = processed_text.replace(word.upper(), f"<emphasis level='strong'>{word.upper()}</emphasis>")
     
     # Clean up multiple spaces
     processed_text = ' '.join(processed_text.split())
     
-    print(f"🔧 Text preprocessing: '{text[:50]}...' → '{processed_text[:50]}...'")
+    print(f"🔧 Text preprocessing for natural speech: '{text[:50]}...' → '{processed_text[:50]}...'")
     return processed_text
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
@@ -139,8 +140,17 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "{os.environ.get('GOOGLE_APPLICAT
 
 async def generate_tts():
    try:
-       # Initialize TTS engine (exact same as your working code)
-       tts_engine = google.TTS()
+        # Initialize TTS engine with natural voice settings
+        tts_engine = google.TTS(
+            voice=google.Voice(
+                name="en-US-Wavenet-D",  # More natural, human-like voice
+                language_code="en-US",
+                ssml_gender="MALE"  # Natural male voice
+            ),
+            speaking_rate=0.9,  # Slightly slower for more natural speech
+            pitch=0.0,  # Natural pitch
+            volume_gain_db=0.0  # Natural volume
+        )
        
        # Read text from file
        with open('{temp_file_path}', 'r') as f:
@@ -764,11 +774,20 @@ def initialize_livekit_components():
             print(f"❌ Failed to initialize STT engine: {e}")
             return False
         
-        # Initialize TTS engine with default voice
+        # Initialize TTS engine with natural voice settings
         try:
-            print("🔧 Initializing TTS engine...")
-            tts_engine = google.TTS()
-            print("✅ TTS engine initialized successfully")
+            print("🔧 Initializing TTS engine with natural voice...")
+            tts_engine = google.TTS(
+                voice=google.Voice(
+                    name="en-US-Wavenet-D",  # More natural, human-like voice
+                    language_code="en-US",
+                    ssml_gender="MALE"  # Natural male voice
+                ),
+                speaking_rate=0.9,  # Slightly slower for more natural speech
+                pitch=0.0,  # Natural pitch
+                volume_gain_db=0.0  # Natural volume
+            )
+            print("✅ TTS engine initialized with natural voice settings")
         except Exception as e:
             print(f"❌ Failed to initialize TTS engine: {e}")
             return False
