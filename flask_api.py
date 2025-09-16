@@ -1109,22 +1109,26 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         
         def run_tts_simple():
             try:
+                print("🔧 Starting TTS thread...")
                 # Create new event loop for this thread
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
+                print("🔧 Event loop created, calling async TTS function...")
                 # Use the original working async function
                 result = loop.run_until_complete(process_text_with_tts_async(processed_text, language, voice))
+                print(f"🔧 Async TTS function completed, result: {result is not None}")
                 result_queue.put(result)
                 
             except Exception as e:
-                exception_queue.put(e)
                 print(f"❌ TTS thread error: {e}")
+                exception_queue.put(e)
                 import traceback
                 traceback.print_exc()
             finally:
                 try:
                     loop.close()
+                    print("🔧 Event loop closed")
                 except:
                     pass
         
@@ -1167,74 +1171,6 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         traceback.print_exc()
         return None
 
-async def process_text_with_tts_async_fast(text, language='en-US', voice='en-US-Wavenet-A'):
-    """Fast async TTS processing with optimized approach"""
-    try:
-        print(f"🔧 Fast async TTS processing for text: {text[:50]}...")
-        
-        if not tts_engine:
-            print("❌ TTS engine not available in async function")
-            return None
-        
-        # Process text using LiveKit TTS directly
-        audio_stream = tts_engine.synthesize(text=text)
-        
-        audio_chunks = []
-        
-        # Try to collect all audio data quickly
-        try:
-            # Method 1: Try to get all data at once
-            if hasattr(audio_stream, '__iter__'):
-                print("🔧 Using direct iteration...")
-                for chunk in audio_stream:
-                    if hasattr(chunk, 'frame') and chunk.frame:
-                        audio_data = chunk.frame.data
-                        audio_chunks.append(audio_data)
-                        print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
-                    elif hasattr(chunk, 'data'):
-                        audio_data = chunk.data
-                        audio_chunks.append(audio_data)
-                        print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
-            else:
-                # Method 2: Try async iteration with timeout
-                print("🔧 Using async iteration with timeout...")
-                async def collect_chunks():
-                    async for chunk in audio_stream:
-                        if hasattr(chunk, 'frame') and chunk.frame:
-                            audio_data = chunk.frame.data
-                            audio_chunks.append(audio_data)
-                            print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
-                        elif hasattr(chunk, 'data'):
-                            audio_data = chunk.data
-                            audio_chunks.append(audio_data)
-                            print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
-                
-                await asyncio.wait_for(collect_chunks(), timeout=10.0)
-                
-        except asyncio.TimeoutError:
-            print("❌ TTS collection timed out after 10 seconds")
-        except Exception as e:
-            print(f"❌ Error collecting audio chunks: {e}")
-        
-        if not audio_chunks:
-            print("❌ No audio chunks collected")
-            return None
-            
-        full_audio_bytes = b"".join(audio_chunks)
-        print(f"✅ Total audio bytes collected: {len(full_audio_bytes)}")
-        
-        # Convert to WAV format
-        wav_audio = create_wav_file(full_audio_bytes)
-        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
-        
-        print(f"✅ WAV audio created: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
-        return audio_base64
-        
-    except Exception as e:
-        print(f"❌ Error in process_text_with_tts_async_fast: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
 
 async def process_text_with_tts_async(text, language='en-US', voice='en-US-Wavenet-A'):
     """Simple and reliable async TTS processing"""
