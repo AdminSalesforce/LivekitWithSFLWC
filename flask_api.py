@@ -1,12 +1,11 @@
 import os
-import sys
 import json
 import base64
 import tempfile
-import subprocess
 import asyncio
 import logging
 import requests
+import time
 from flask import Flask, request, jsonify
 try:
     from flask_cors import CORS
@@ -46,141 +45,82 @@ salesforce_token_cache = {}
 salesforce_session_cache = {}
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
-    """Synchronous wrapper for TTS processing using subprocess"""
+    """TTS processing using LiveKit directly (matching working code)"""
     try:
         print("🔧 process_text_with_tts_sync FUNCTION CALLED")
         print(f"🔧 Text: {text[:50]}...")
         print(f"🔧 Language: {language}, Voice: {voice}")
         
-        # Create temporary file with text
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
-            temp_file.write(text)
-            temp_file_path = temp_file.name
-
-        try:
-            # Create a simple TTS script
-            tts_script = f"""
-import os
-import sys
-import json
-import base64
-import tempfile
-import asyncio
-from livekit.plugins import google
-
-# Set up Google credentials
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "{os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}"
-
-async def generate_tts():
-   try:
-       # Initialize TTS engine
-       tts_engine = google.TTS()
-       
-       # Read text from file
-       with open('{temp_file_path}', 'r') as f:
-           text = f.read()
-       
-       print(f"Processing text: {{text[:50]}}...")
-       
-       # Generate audio
-       audio_stream = tts_engine.synthesize(text=text)
-       
-       audio_chunks = []
-       try:
-           # Try async iteration first
-           async for chunk in audio_stream:
-               if hasattr(chunk, 'frame') and chunk.frame:
-                   audio_data = chunk.frame.data
-                   audio_chunks.append(audio_data)
-                   print(f"Collected chunk: {{len(audio_data)}} bytes")
-       except:
-           # Fallback to sync iteration
-           for chunk in audio_stream:
-               if hasattr(chunk, 'frame') and chunk.frame:
-                   audio_data = chunk.frame.data
-                   audio_chunks.append(audio_data)
-                   print(f"Collected chunk: {{len(audio_data)}} bytes")
-       
-       if not audio_chunks:
-           print("No audio chunks collected")
-           return None
-       
-       # Combine audio data
-       full_audio_bytes = b"".join(audio_chunks)
-       print(f"Total audio bytes: {{len(full_audio_bytes)}}")
-       
-       # Create WAV file
-       wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
-           b'RIFF', 36 + len(full_audio_bytes), b'WAVE', b'fmt ', 16, 1,
-           1, 24000, 24000 * 1 * 16 // 8, 1 * 16 // 8, 16, b'data', len(full_audio_bytes)
-       )
-       wav_audio = wav_header + full_audio_bytes
-       
-       # Convert to base64
-       audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
-       print(f"WAV audio created: {{len(wav_audio)}} bytes")
-       
-       return audio_base64
-       
-   except Exception as e:
-       print(f"Error in TTS: {{e}}")
-       import traceback
-       traceback.print_exc()
-       return None
-
-if __name__ == "__main__":
-   import struct
-   result = asyncio.run(generate_tts())
-   if result:
-       print("SUCCESS:" + result)
-   else:
-       print("FAILED")
-"""
-
-            # Write script to temporary file
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
-                script_file.write(tts_script)
-                script_path = script_file.name
-
-            try:
-                # Run the script
-                print("🔧 Running TTS subprocess...")
-                result = subprocess.run(
-                    [sys.executable, script_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    check=False
-                )
-
-                print(f"🔧 Subprocess return code: {result.returncode}")
-                print(f"🔧 Subprocess stdout: {result.stdout}")
-                print(f"🔧 Subprocess stderr: {result.stderr}")
-
-                if result.returncode == 0 and "SUCCESS:" in result.stdout:
-                    # Extract the base64 audio data
-                    audio_base64 = result.stdout.split("SUCCESS:")[1].strip()
-                    print("✅ TTS subprocess completed successfully")
-                    print(f"✅ Audio data length: {len(audio_base64)} characters")
-                    return audio_base64
-                else:
-                    print("❌ TTS subprocess failed")
-                    return None
-
-            finally:
-                # Clean up temporary files
-                try:
-                    os.unlink(script_path)
-                    os.unlink(temp_file_path)
-                except:
-                    pass
-
-        except Exception as e:
-            print(f"❌ Error in TTS subprocess: {e}")
-            import traceback
-            traceback.print_exc()
+        # Use the global TTS engine (initialized in initialize_livekit_components)
+        if not tts_engine:
+            print("❌ TTS engine not available")
             return None
-
+        
+        print("🔧 Using LiveKit TTS engine directly...")
+        
+        # Generate audio using LiveKit TTS (matching working code)
+        audio_stream = tts_engine.synthesize(text=text)
+        
+        audio_chunks = []
+        
+        # Collect audio chunks (matching working code approach)
+        try:
+            # Try async iteration first
+            async def collect_audio():
+                try:
+                    async for chunk in audio_stream:
+                        if hasattr(chunk, 'frame') and chunk.frame:
+                            audio_data = chunk.frame.data
+                            audio_chunks.append(audio_data)
+                            print(f"🔧 Collected chunk: {len(audio_data)} bytes")
+                except TypeError:
+                    # audio_stream might not be async iterable
+                    print("🔧 Audio stream is not async iterable, trying sync approach...")
+                    # Try to convert to list and iterate
+                    try:
+                        all_chunks = list(audio_stream)
+                        for chunk in all_chunks:
+                            if hasattr(chunk, 'frame') and chunk.frame:
+                                audio_data = chunk.frame.data
+                                audio_chunks.append(audio_data)
+                                print(f"🔧 Collected chunk: {len(audio_data)} bytes")
+                    except Exception as e3:
+                        print(f"❌ List conversion failed: {e3}")
+                        raise
+            
+            # Run async collection
+            asyncio.run(collect_audio())
+            
+        except Exception as e:
+            print(f"🔧 Async iteration failed: {e}, trying sync iteration...")
+            try:
+                # Fallback to sync iteration
+                for chunk in audio_stream:
+                    if hasattr(chunk, 'frame') and chunk.frame:
+                        audio_data = chunk.frame.data
+                        audio_chunks.append(audio_data)
+                        print(f"🔧 Collected chunk: {len(audio_data)} bytes")
+            except Exception as e2:
+                print(f"❌ Sync iteration also failed: {e2}")
+                return None
+        
+        if not audio_chunks:
+            print("❌ No audio chunks collected")
+            return None
+        
+        # Combine audio data
+        full_audio_bytes = b"".join(audio_chunks)
+        print(f"✅ Total audio bytes: {len(full_audio_bytes)}")
+        
+        # Create WAV file (matching working code structure)
+        wav_audio = create_wav_file(full_audio_bytes)
+        
+        # Convert to base64
+        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
+        print(f"✅ WAV audio created: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
+        
+        return audio_base64
+        
     except Exception as e:
         print(f"❌ Error in process_text_with_tts_sync: {e}")
         logger.error("Error in process_text_with_tts_sync: %s", e)
@@ -436,8 +376,79 @@ def clear_salesforce_caches():
     salesforce_session_cache.clear()
     print("✅ Salesforce caches cleared")
 
+def start_salesforce_session(agent_id, session_id):
+    """Start a Salesforce Einstein Agent session"""
+    try:
+        print(f"🔧 Starting Salesforce session for agent: {agent_id}")
+        
+        # Get access token
+        access_token = get_salesforce_access_token()
+        if not access_token:
+            print("❌ Failed to get Salesforce access token")
+            return None
+        
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Use the correct API host and endpoint structure
+        url = f"https://api.salesforce.com/einstein/ai-agent/v1/agents/{agent_id}/sessions"
+        payload = {
+            "externalSessionKey": session_id,
+            "instanceConfig": {
+                "endpoint": SALESFORCE_ORG_DOMAIN
+            },
+            "tz": "America/Los_Angeles",
+            "variables": [
+                {
+                    "name": "$Context.EndUserLanguage",
+                    "type": "Text",
+                    "value": "en_US"
+                }
+            ],
+            "featureSupport": "Streaming",
+            "streamingCapabilities": {
+                "chunkTypes": [
+                    "Text"
+                ]
+            },
+            "bypassUser": False
+        }
+        
+        print(f"🔧 Starting session at: {url}")
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        print(f"🔧 Start session response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            print("✅ Session started successfully")
+            print(f"🔧 Session response: {result}")
+            
+            # Store the actual session ID from Salesforce response
+            salesforce_session_id = result.get('sessionId')
+            if salesforce_session_id:
+                print(f"✅ Stored Salesforce session ID: {salesforce_session_id}")
+                # Cache the Salesforce session ID for this agent
+                salesforce_session_cache[f"{agent_id}_salesforce_session"] = salesforce_session_id
+                return salesforce_session_id
+            else:
+                print("❌ No sessionId in response")
+                return None
+        else:
+            print(f"❌ Failed to start session: {response.status_code}")
+            print(f"❌ Response: {response.text}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error starting Salesforce session: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 def call_salesforce_einstein_agent(message, session_id, agent_id):
-    """Call Salesforce Einstein Agent API"""
+    """Call Salesforce Einstein Agent API using the working implementation"""
     try:
         print("🔧 Calling Salesforce Einstein Agent API...")
         print(f"🔧 Message: {message[:50]}...")
@@ -450,46 +461,157 @@ def call_salesforce_einstein_agent(message, session_id, agent_id):
             print("❌ Failed to get Salesforce access token")
             return None
         
-        # Prepare Einstein Agent API request
-        # Note: The actual Einstein Agent API endpoint may vary based on your Salesforce setup
-        # This is a generic implementation - you may need to adjust the endpoint
-        einstein_url = f"{SALESFORCE_ORG_DOMAIN}/services/data/v58.0/einstein/agents/{agent_id}/chat"
+        # Check if we have a Salesforce session for this agent
+        salesforce_session_key = f"{agent_id}_salesforce_session"
+        if salesforce_session_key not in salesforce_session_cache:
+            print("🔧 No Salesforce session found, starting new session...")
+            salesforce_session_id = start_salesforce_session(agent_id, session_id)
+            if not salesforce_session_id:
+                print("❌ Failed to start Salesforce session")
+                return None
+        else:
+            salesforce_session_id = salesforce_session_cache[salesforce_session_key]
+            print(f"✅ Using existing Salesforce session: {salesforce_session_id}")
         
         headers = {
             'Authorization': f'Bearer {access_token}',
             'Content-Type': 'application/json'
         }
         
-        # Prepare request body for Einstein Agent
-        request_body = {
-            'message': message,
-            'sessionId': session_id,
-            'agentId': agent_id
+        # Use the correct API host and endpoint structure for sending messages
+        url = f"https://api.salesforce.com/einstein/ai-agent/v1/sessions/{salesforce_session_id}/messages"
+        
+        print(f"🔧 Sending message to URL: {url}")
+        print(f"🔧 Using Salesforce session ID: {salesforce_session_id}")
+        
+        payload = {
+            "message": {
+                "sequenceId": str(int(time.time() * 1000)),  # timestamp as sequenceId
+                "type": "Text",
+                "text": message
+            }
         }
         
-        print(f"🔧 Calling Einstein API: {einstein_url}")
-        
         # Make the API call
-        response = requests.post(einstein_url, headers=headers, json=request_body, timeout=30)
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         
-        print(f"🔧 Einstein API Response Status: {response.status_code}")
+        print(f"🔧 Salesforce API response status: {response.status_code}")
+        print(f"🔧 Salesforce API response headers: {dict(response.headers)}")
         
         if response.status_code == 200:
-            response_data = response.json()
-            print("✅ Einstein Agent API call successful")
-            return response_data
-        else:
-            print(f"❌ Einstein Agent API call failed: {response.status_code}")
-            print(f"❌ Response: {response.text}")
+            print("✅ Salesforce API returned 200, processing response")
+            result = response.json()
+            print(f"🔧 Salesforce response: {result}")
             
-            # If the specific Einstein Agent endpoint doesn't work, try a generic approach
-            # This is a fallback for when the exact Einstein Agent API structure is different
-            print("🔧 Trying fallback approach...")
+            # Parse the response according to your working structure
+            if 'message' in result:
+                # Direct message response
+                response_message = result.get('message', 'No response message')
+                print(f"✅ Direct message response: {response_message}")
+                return {
+                    'message': response_message,
+                    'sessionId': salesforce_session_id,
+                    'agentId': agent_id,
+                    'success': True
+                }
+            elif 'messages' in result:
+                # Array response format
+                messages = result.get('messages', [])
+                if messages and len(messages) > 0:
+                    message_obj = messages[0]
+                    message_type = message_obj.get('type', '')
+                    
+                    print(f"🔧 Message type: {message_type}")
+                    
+                    # Handle different response types
+                    if message_type == 'Inform':
+                        response_message = message_obj.get('message', 'No response message')
+                        print(f"✅ Inform response: {response_message}")
+                        return {
+                            'message': response_message,
+                            'sessionId': salesforce_session_id,
+                            'agentId': agent_id,
+                            'success': True
+                        }
+                    elif message_type == 'Failure':
+                        print(f"❌ Salesforce returned Failure: {message_obj}")
+                        # Check if there's a message field with content
+                        if message_obj.get('message'):
+                            return {
+                                'message': message_obj.get('message'),
+                                'sessionId': salesforce_session_id,
+                                'agentId': agent_id,
+                                'success': False
+                            }
+                        # Check if there are errors with useful information
+                        errors = message_obj.get('errors', [])
+                        if errors and len(errors) > 0:
+                            error_msg = errors[0]
+                            return {
+                                'message': f"I encountered an issue: {error_msg}",
+                                'sessionId': salesforce_session_id,
+                                'agentId': agent_id,
+                                'success': False
+                            }
+                        # If no useful error info, use fallback
+                        return {
+                            'message': f"I received your message: '{message}'. I'm a Salesforce Einstein Agent, but I'm having trouble with the specific API endpoint. Please check your Salesforce configuration.",
+                            'sessionId': salesforce_session_id,
+                            'agentId': agent_id,
+                            'success': False
+                        }
+                    elif message_type == 'Text':
+                        response_message = message_obj.get('text', 'No response text')
+                        print(f"✅ Text response: {response_message}")
+                        return {
+                            'message': response_message,
+                            'sessionId': salesforce_session_id,
+                            'agentId': agent_id,
+                            'success': True
+                        }
+                    else:
+                        # For any other type, try to get the message field
+                        response_message = message_obj.get('message', f'Received response type: {message_type}')
+                        print(f"✅ Other response type: {response_message}")
+                        return {
+                            'message': response_message,
+                            'sessionId': salesforce_session_id,
+                            'agentId': agent_id,
+                            'success': True
+                        }
+                else:
+                    return {
+                        'message': "No messages in response",
+                        'sessionId': salesforce_session_id,
+                        'agentId': agent_id,
+                        'success': False
+                    }
+            else:
+                return {
+                    'message': "No response message found",
+                    'sessionId': salesforce_session_id,
+                    'agentId': agent_id,
+                    'success': False
+                }
+        elif response.status_code == 404:
+            print("❌ Einstein Agent API not available (404), using fallback response")
+            error_text = response.text
+            print(f"❌ 404 Error response: {error_text}")
             return {
                 'message': f"I received your message: '{message}'. I'm a Salesforce Einstein Agent, but I'm having trouble with the specific API endpoint. Please check your Salesforce configuration.",
-                'sessionId': session_id,
+                'sessionId': salesforce_session_id,
                 'agentId': agent_id,
-                'success': True
+                'success': False
+            }
+        else:
+            print(f"❌ Salesforce API error: {response.status_code}")
+            error_text = response.text
+            print(f"❌ Error response: {error_text}")
+            return {
+                'message': f"I received your message: '{message}'. I'm a Salesforce Einstein Agent, but I'm having trouble with the specific API endpoint. Please check your Salesforce configuration.",
+                'sessionId': salesforce_session_id,
+                'agentId': agent_id,
+                'success': False
             }
             
     except Exception as e:
@@ -579,7 +701,7 @@ def health_check():
         "status": "healthy",
         "message": "LiveKit Voice Agent API is running",
         "components": {
-            "stt_engine": stt_engine is not None,
+            "stt_engine": "Browser-based (LWC)",
             "tts_engine": tts_engine is not None,
             "agent_session": agent_session is not None,
             "agent": agent is not None
@@ -593,7 +715,8 @@ def health_check():
         "cache_status": {
             "has_access_token": "access_token" in salesforce_token_cache,
             "token_expires_at": salesforce_token_cache.get('expires_at', 'N/A'),
-            "cached_sessions": list(salesforce_session_cache.keys())
+            "cached_sessions": list(salesforce_session_cache.keys()),
+            "salesforce_sessions": [k for k in salesforce_session_cache.keys() if k.endswith('_salesforce_session')]
         }
     })
 
@@ -670,25 +793,28 @@ def clear_cache():
 
 @app.route('/api/voice/stt', methods=['POST'])
 def speech_to_text():
-    """Speech-to-Text endpoint"""
+    """Speech-to-Text endpoint - STT is handled by browser in LWC"""
     try:
-        _ = request.get_json()  # Get request data but don't store in unused variable
-        # audio_data = data.get('audio_data')  # Will be used in actual STT implementation
+        data = request.get_json()
+        print("🔧 STT endpoint called - STT handled by browser in LWC")
+        print(f"🔧 STT request data: {json.dumps(data, indent=2)}")
 
-        # Initialize LiveKit components if not already done
-        if not stt_engine:
-            result = initialize_livekit_components()
-            if not result:
-                return jsonify({"error": "Failed to initialize LiveKit components"}), 500
-
-        # Process audio with STT
-        # Note: This is a simplified example - actual implementation would process audio data
-        text = "Speech converted to text"  # Placeholder for actual STT processing
-
+        # STT is handled by the browser in the LWC component
+        # This endpoint is kept for compatibility but STT processing happens client-side
+        text = data.get('text', '') if data else ''
+        
+        if not text:
+            return jsonify({
+                "text": "No text provided - STT is handled by browser in LWC",
+                "note": "Speech-to-Text is processed client-side in the Lightning Web Component"
+            })
+        
         return jsonify({
-            "text": text
+            "text": text,
+            "note": "STT processed by browser, text received successfully"
         })
     except Exception as e:
+        print(f"❌ Error in STT endpoint: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/voice/tts', methods=['POST'])
@@ -721,7 +847,7 @@ def text_to_speech():
 
         print("✅ TTS engine available, processing...")
 
-        # Process text with TTS using synchronous wrapper
+        # Process text with TTS using LiveKit directly (matching working code)
         audio_content = process_text_with_tts_sync(text, language, voice)
 
         print(f"✅ TTS generated, audio length: {len(audio_content) if audio_content else 'null'}")
