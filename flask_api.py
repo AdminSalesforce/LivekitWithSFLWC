@@ -1213,16 +1213,18 @@ async def process_text_with_livekit_session_say(text):
             # Create a room for the AgentSession
             room = Room()
             
-            # Create room options
-            room_options = RoomOptions()
+            # Generate access token for room connection
+            from livekit import api
+            token = api.AccessToken() \
+                .with_identity("agent_participant") \
+                .with_grants(api.VideoGrants(room_join=True, room="agent_room")) \
+                .to_jwt()
             
             # Connect to the room (this will start the AgentSession)
             print("🔧 Connecting to room to start AgentSession...")
             await room.connect(
                 os.environ.get("LIVEKIT_URL"), 
-                os.environ.get("LIVEKIT_API_KEY"), 
-                os.environ.get("LIVEKIT_API_SECRET"),
-                room_options
+                token
             )
             
             # Start the AgentSession with the room
