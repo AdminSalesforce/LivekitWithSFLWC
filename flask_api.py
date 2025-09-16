@@ -1133,10 +1133,10 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         tts_thread.start()
         
         # Wait for result with timeout
-        tts_thread.join(timeout=20)
+        tts_thread.join(timeout=30)
         
         if tts_thread.is_alive():
-            print("❌ TTS processing timed out after 20 seconds")
+            print("❌ TTS processing timed out after 30 seconds")
             return None
         
         # Check for exceptions
@@ -1237,7 +1237,7 @@ async def process_text_with_tts_async_fast(text, language='en-US', voice='en-US-
         return None
 
 async def process_text_with_tts_async(text, language='en-US', voice='en-US-Wavenet-A'):
-    """Async TTS processing using LiveKit directly"""
+    """Simple and reliable async TTS processing"""
     try:
         print(f"🔧 Async TTS processing for text: {text[:50]}...")
         
@@ -1250,33 +1250,22 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
         
         audio_chunks = []
         
-        # Try different approaches to get audio data
+        # Simple approach - try both async and sync iteration
         try:
-            # Method 1: Try async iteration with timeout
-            print("🔧 Trying async iteration with timeout...")
-            
-            async def collect_audio_chunks():
-                async for chunk in audio_stream:
-                    if hasattr(chunk, 'frame') and chunk.frame:
-                        audio_data = chunk.frame.data
-                        audio_chunks.append(audio_data)
-                        print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
-                    elif hasattr(chunk, 'data'):
-                        audio_data = chunk.data
-                        audio_chunks.append(audio_data)
-                        print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
-            
-            # Run with timeout
-            await asyncio.wait_for(collect_audio_chunks(), timeout=25.0)
-            
-        except asyncio.TimeoutError:
-            print("❌ Async iteration timed out after 25 seconds")
+            print("🔧 Trying async iteration...")
+            async for chunk in audio_stream:
+                if hasattr(chunk, 'frame') and chunk.frame:
+                    audio_data = chunk.frame.data
+                    audio_chunks.append(audio_data)
+                    print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
+                elif hasattr(chunk, 'data'):
+                    audio_data = chunk.data
+                    audio_chunks.append(audio_data)
+                    print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
         except Exception as e:
-            print(f"❌ Async iteration failed: {e}")
-            
-            # Method 2: Try synchronous iteration
+            print(f"❌ Async iteration failed: {e}, trying sync...")
             try:
-                print("🔧 Trying synchronous iteration...")
+                # Fallback to sync iteration
                 for chunk in audio_stream:
                     if hasattr(chunk, 'frame') and chunk.frame:
                         audio_data = chunk.frame.data
@@ -1287,26 +1276,8 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
                         audio_chunks.append(audio_data)
                         print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
             except Exception as e2:
-                print(f"❌ Synchronous iteration also failed: {e2}")
-                
-                # Method 3: Try to get all data at once
-                try:
-                    print("🔧 Trying to get all data at once...")
-                    if hasattr(audio_stream, '__iter__'):
-                        all_data = list(audio_stream)
-                        print(f"🔧 Got {len(all_data)} items from stream")
-                        for item in all_data:
-                            if hasattr(item, 'frame') and item.frame:
-                                audio_data = item.frame.data
-                                audio_chunks.append(audio_data)
-                                print(f"🔧 Collected audio chunk: {len(audio_data)} bytes")
-                            elif hasattr(item, 'data'):
-                                audio_data = item.data
-                                audio_chunks.append(audio_data)
-                                print(f"🔧 Collected audio chunk (data): {len(audio_data)} bytes")
-                except Exception as e3:
-                    print(f"❌ All methods failed: {e3}")
-                    return None
+                print(f"❌ Sync iteration also failed: {e2}")
+                return None
         
         if not audio_chunks:
             print("❌ No audio chunks collected")
