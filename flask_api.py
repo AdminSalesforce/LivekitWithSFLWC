@@ -12,10 +12,6 @@ import uuid
 import tempfile
 import logging
 import time
-import base64
-import struct
-import queue
-import threading
 from flask_cors import CORS
 
 # Initialize logging first
@@ -140,10 +136,9 @@ print(f"🔧 Final GOOGLE_APPLICATION_CREDENTIALS: {os.environ.get('GOOGLE_APPLI
 print(f"🔧 File exists: {os.path.exists(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', ''))}")
 
 # LiveKit imports - must be at module level for plugin registration
-from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, llm, Agent, ConversationItemAddedEvent, UserInputTranscribedEvent
+from livekit.agents import Agent
 from livekit.agents.voice import AgentSession
 from livekit.plugins import google
-from livekit import rtc
 
 app = Flask(__name__)
 CORS(app)
@@ -974,7 +969,7 @@ def process_voice():
         return jsonify({"error": str(e)}), 500
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
-    """Synchronous wrapper for TTS processing to avoid event loop issues"""
+    """Synchronous wrapper for TTS processing using subprocess approach"""
     try:
         print(f"🔧 Processing TTS for text: {text[:50]}...")
         print(f"Language: {language}, Voice: {voice}")
@@ -983,68 +978,105 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
             print("❌ TTS engine not available")
             return None
         
-        # Create a new event loop for this TTS operation
-        import asyncio
-        import threading
-        import queue
+        # Use subprocess to run TTS in a completely separate process
+        import subprocess
+        import tempfile
+        import sys
         
-        # Use a queue to pass the result back from the thread
-        result_queue = queue.Queue()
-        exception_queue = queue.Queue()
+        # Create a temporary script file for TTS processing
+        tts_script = f"""
+import asyncio
+import sys
+import json
+import os
+import tempfile
+import base64
+import struct
+
+# Set up the environment
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "{os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', '')}"
+os.environ["GOOGLE_API_KEY"] = "{os.environ.get('GOOGLE_API_KEY', '')}"
+
+# Import LiveKit components
+from livekit.plugins import google
+
+async def process_tts():
+    try:
+        # Initialize TTS engine
+        tts_engine = google.TTS()
         
-        def run_tts_in_thread():
-            loop = None
-            try:
-                # Create a completely new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                # Run the async TTS function
-                result = loop.run_until_complete(process_text_with_tts_async(text, language, voice))
-                result_queue.put(result)
-                
-            except Exception as e:
-                print(f"❌ Exception in TTS thread: {e}")
-                exception_queue.put(e)
-            finally:
-                # Only close the loop if it was created successfully
-                if loop and not loop.is_closed():
-                    try:
-                        # Cancel any remaining tasks
-                        pending = asyncio.all_tasks(loop)
-                        for task in pending:
-                            task.cancel()
-                        # Wait for tasks to be cancelled
-                        if pending:
-                            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                        # Close the loop
-                        loop.close()
-                    except Exception as close_error:
-                        print(f"❌ Error closing loop: {close_error}")
+        # Process text
+        audio_stream = tts_engine.synthesize(text="{text}")
         
-        # Start the TTS processing in a separate thread
-        tts_thread = threading.Thread(target=run_tts_in_thread)
-        tts_thread.start()
-        tts_thread.join(timeout=30)  # Wait for the thread to complete with 30 second timeout
+        audio_chunks = []
+        async for chunk in audio_stream:
+            if hasattr(chunk, 'frame') and chunk.frame:
+                audio_data = chunk.frame.data
+                audio_chunks.append(audio_data)
         
-        # Check if thread is still alive (timed out)
-        if tts_thread.is_alive():
-            print("❌ TTS processing timed out after 30 seconds")
-            return None
-        
-        # Check for exceptions
-        if not exception_queue.empty():
-            raise exception_queue.get()
-        
-        # Get the result
-        if not result_queue.empty():
-            result = result_queue.get()
-            print(f"✅ TTS processing completed successfully")
-            return result
-        else:
-            print("❌ No result from TTS processing")
+        if not audio_chunks:
             return None
             
+        full_audio_bytes = b"".join(audio_chunks)
+        
+        # Convert to WAV format
+        wav_audio = create_wav_file(full_audio_bytes)
+        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
+        
+        return audio_base64
+        
+    except Exception as e:
+        print(f"Error in TTS subprocess: {{e}}", file=sys.stderr)
+        return None
+
+def create_wav_file(audio_data, sample_rate=24000, channels=1, bits_per_sample=16):
+    wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
+        b'RIFF', 36 + len(audio_data), b'WAVE', b'fmt ', 16, 1,
+        channels, sample_rate, sample_rate * channels * bits_per_sample // 8,
+        channels * bits_per_sample // 8, bits_per_sample, b'data', len(audio_data)
+    )
+    return wav_header + audio_data
+
+if __name__ == "__main__":
+    result = asyncio.run(process_tts())
+    if result:
+        print(result)
+    else:
+        sys.exit(1)
+"""
+        
+        # Write script to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(tts_script)
+            script_path = f.name
+        
+        try:
+            # Run the script in a subprocess
+            result = subprocess.run(
+                [sys.executable, script_path],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                audio_base64 = result.stdout.strip()
+                print(f"✅ TTS processing completed successfully")
+                return audio_base64
+            else:
+                print(f"❌ TTS subprocess failed: {result.stderr}")
+                return None
+                
+        finally:
+            # Clean up the temporary script file
+            try:
+                os.unlink(script_path)
+            except:
+                pass
+            
+    except subprocess.TimeoutExpired:
+        print("❌ TTS processing timed out after 30 seconds")
+        return None
     except Exception as e:
         print(f"❌ Error in process_text_with_tts_sync: {e}")
         logger.error(f"Error in process_text_with_tts_sync: {e}")
@@ -1052,97 +1084,7 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         traceback.print_exc()
         return None
 
-async def process_text_with_tts_async(text, language='en-US', voice='en-US-Wavenet-A'):
-    """Async TTS processing function"""
-    try:
-        print(f"🔧 Processing TTS for text: {text[:50]}...")
-        print(f"Language: {language}, Voice: {voice}")
-        
-        if not tts_engine:
-            print("❌ TTS engine not available")
-            return None
-        
-        # Use LiveKit TTS with only text parameter (voice and language parameters not supported)
-        audio_stream = tts_engine.synthesize(
-            text=text
-        )
-        
-        print("🔧 TTS synthesis started...")
-        audio_chunks = []
-        
-        # Add timeout to prevent hanging
-        try:
-            # Use asyncio.wait_for to wrap the entire async iteration
-            async def process_audio_stream():
-                async for chunk in audio_stream:
-                    # Access audio data from the frame attribute
-                    if hasattr(chunk, 'frame') and chunk.frame:
-                        # Get the raw audio data from the AudioFrame
-                        audio_data = chunk.frame.data
-                        audio_chunks.append(audio_data)
-                        print(f"🔧 Received audio chunk: {len(audio_data)} bytes")
-                    else:
-                        print(f"🔧 No audio data in chunk: {chunk}")
-            
-            # Wait for the audio processing with timeout
-            await asyncio.wait_for(process_audio_stream(), timeout=25.0)
-            
-        except asyncio.TimeoutError:
-            print("❌ TTS synthesis timed out after 25 seconds")
-            return None
-        
-        if not audio_chunks:
-            print("❌ No audio chunks received")
-            return None
-            
-        full_audio_bytes = b"".join(audio_chunks)
-        print(f"✅ TTS synthesis complete: {len(full_audio_bytes)} total bytes")
-        
-        # Convert raw audio to WAV format
-        wav_audio = create_wav_file(full_audio_bytes)
-        print(f"✅ WAV audio created: {len(wav_audio)} bytes")
-        
-        # Encode to base64 for transmission
-        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
-        print(f"✅ Audio encoded to base64: {len(audio_base64)} characters")
-        
-        return audio_base64
-        
-    except Exception as e:
-        print(f"❌ Error in process_text_with_tts_async: {e}")
-        logger.error(f"Error in process_text_with_tts_async: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
 
-def create_wav_file(audio_data, sample_rate=24000, channels=1, bits_per_sample=16):
-    """Create a WAV file from raw audio data"""
-    try:
-        import struct
-        
-        # WAV file header
-        wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
-            b'RIFF',                    # ChunkID
-            36 + len(audio_data),       # ChunkSize
-            b'WAVE',                    # Format
-            b'fmt ',                    # Subchunk1ID
-            16,                         # Subchunk1Size
-            1,                          # AudioFormat (PCM)
-            channels,                   # NumChannels
-            sample_rate,                # SampleRate
-            sample_rate * channels * bits_per_sample // 8,  # ByteRate
-            channels * bits_per_sample // 8,  # BlockAlign
-            bits_per_sample,            # BitsPerSample
-            b'data',                    # Subchunk2ID
-            len(audio_data)             # Subchunk2Size
-        )
-        
-        return wav_header + audio_data
-        
-    except Exception as e:
-        print(f"❌ Error creating WAV file: {e}")
-        # Return raw audio data if WAV creation fails
-        return audio_data
 
 @app.route('/api/voice/stt', methods=['POST'])
 def speech_to_text():
