@@ -8,6 +8,7 @@ import asyncio
 import logging
 import requests
 import time
+import threading
 from flask import Flask, request, jsonify
 try:
     from flask_cors import CORS
@@ -36,6 +37,10 @@ agent = None
 # TTS engine cache to store TTS engines for different voices
 tts_engine_cache = {}
 
+# Global event loop for streaming TTS (reuse across calls)
+_streaming_loop = None
+_streaming_loop_lock = None
+
 # Streaming TTS configuration
 STREAMING_CHUNK_SIZE = 1024  # Size of audio chunks for streaming
 STREAMING_DELAY = 0.1  # Delay between chunks in seconds
@@ -50,6 +55,13 @@ SALESFORCE_AGENT_ID = os.environ.get('SALESFORCE_AGENT_ID', '')
 salesforce_token_cache = {}
 salesforce_session_cache = {}
 
+# Performance tracking for streaming TTS
+_streaming_performance = {
+    "first_call_time": None,
+    "subsequent_call_times": [],
+    "total_calls": 0
+}
+
 def create_tts_engine_with_voice(voice_name="en-US-Wavenet-C"):
     """Create a TTS engine with specific Wavenet voice configuration"""
     try:
@@ -61,6 +73,8 @@ def create_tts_engine_with_voice(voice_name="en-US-Wavenet-C"):
             return tts_engine_cache[voice_name]
         
         # Create new TTS engine with voice configuration
+        # Note: LiveKit TTS doesn't support voice selection in the constructor
+        # Voice selection is handled by the Google Cloud TTS service internally
         new_tts_engine = google.TTS()
         
         # Cache the engine
@@ -303,29 +317,73 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
         traceback.print_exc()
         return None
 
-def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
-    """Process text with streaming TTS using proper event loop handling"""
-    try:
-        print(f"🔧 Starting streaming TTS with voice: {voice_name}")
-        print(f"🔧 Original text: {text[:50]}...")
-        
-        # Method 1: Try async streaming TTS first
-        try:
-            # Create a new event loop for this thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+def get_or_create_streaming_loop():
+    """Get or create a persistent event loop for streaming TTS"""
+    global _streaming_loop, _streaming_loop_lock
+    
+    if _streaming_loop_lock is None:
+        _streaming_loop_lock = threading.Lock()
+    
+    with _streaming_loop_lock:
+        if _streaming_loop is None or _streaming_loop.is_closed():
+            print("🔧 Creating new persistent event loop for streaming TTS...")
+            _streaming_loop = asyncio.new_event_loop()
+            # Start the loop in a separate thread
+            def run_loop():
+                asyncio.set_event_loop(_streaming_loop)
+                _streaming_loop.run_forever()
             
-            try:
-                # Run the async function in the new event loop
-                result = loop.run_until_complete(generate_streaming_tts_async(text, voice_name))
-                if result:
-                    print("✅ Async streaming TTS completed successfully")
-                    return result
+            loop_thread = threading.Thread(target=run_loop, daemon=True)
+            loop_thread.start()
+            print("✅ Persistent event loop created and started")
+        else:
+            print("✅ Reusing existing event loop for streaming TTS")
+    
+    return _streaming_loop
+
+def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
+    """Process text with streaming TTS using optimized event loop handling"""
+    global _streaming_performance
+    
+    start_time = time.time()
+    _streaming_performance["total_calls"] += 1
+    
+    try:
+        print(f"🔧 Starting optimized streaming TTS with voice: {voice_name}")
+        print(f"🔧 Original text: {text[:50]}...")
+        print(f"🔧 Call #{_streaming_performance['total_calls']}")
+        
+        # Method 1: Try optimized async streaming TTS first
+        try:
+            # Get or create persistent event loop
+            loop = get_or_create_streaming_loop()
+            
+            # Submit the async function to the persistent loop
+            future = asyncio.run_coroutine_threadsafe(
+                generate_streaming_tts_async(text, voice_name), 
+                loop
+            )
+            
+            # Wait for result with timeout
+            result = future.result(timeout=30)
+            
+            if result:
+                end_time = time.time()
+                call_duration = end_time - start_time
+                
+                if _streaming_performance["first_call_time"] is None:
+                    _streaming_performance["first_call_time"] = call_duration
+                    print(f"✅ First call completed in {call_duration:.2f} seconds")
                 else:
-                    print("❌ Async streaming TTS returned None, trying fallback...")
-            finally:
-                # Clean up the event loop
-                loop.close()
+                    _streaming_performance["subsequent_call_times"].append(call_duration)
+                    avg_subsequent = sum(_streaming_performance["subsequent_call_times"]) / len(_streaming_performance["subsequent_call_times"])
+                    print(f"✅ Subsequent call #{len(_streaming_performance['subsequent_call_times'])} completed in {call_duration:.2f} seconds")
+                    print(f"🔧 Average subsequent call time: {avg_subsequent:.2f} seconds")
+                
+                print("✅ Optimized async streaming TTS completed successfully")
+                return result
+            else:
+                print("❌ Optimized async streaming TTS returned None, trying fallback...")
                 
         except AttributeError as attr_error:
             if "_interceptors_task" in str(attr_error):
@@ -335,7 +393,7 @@ def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
                 print(f"❌ Attribute error in async streaming: {attr_error}")
                 print("🔧 Trying subprocess fallback...")
         except Exception as async_error:
-            print(f"❌ Error in async streaming TTS: {async_error}")
+            print(f"❌ Error in optimized async streaming TTS: {async_error}")
             print("🔧 Trying subprocess fallback...")
         
         # Method 2: Fallback to subprocess approach for gRPC issues
@@ -344,7 +402,9 @@ def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
             # Use the existing subprocess TTS method as fallback
             fallback_result = process_text_with_tts_sync(text, 'en-US', voice_name)
             if fallback_result:
-                print("✅ Subprocess fallback TTS completed successfully")
+                end_time = time.time()
+                call_duration = end_time - start_time
+                print(f"✅ Subprocess fallback TTS completed in {call_duration:.2f} seconds")
                 return fallback_result
             else:
                 print("❌ Subprocess fallback also failed")
@@ -1168,6 +1228,12 @@ def health_check():
             "token_expires_at": salesforce_token_cache.get('expires_at', 'N/A'),
             "cached_sessions": list(salesforce_session_cache.keys()),
             "salesforce_sessions": [k for k in salesforce_session_cache.keys() if k.endswith('_salesforce_session')]
+        },
+        "streaming_performance": {
+            "total_calls": _streaming_performance["total_calls"],
+            "first_call_time": _streaming_performance["first_call_time"],
+            "subsequent_calls_count": len(_streaming_performance["subsequent_call_times"]),
+            "average_subsequent_time": sum(_streaming_performance["subsequent_call_times"]) / len(_streaming_performance["subsequent_call_times"]) if _streaming_performance["subsequent_call_times"] else None
         }
     })
 
@@ -1385,14 +1451,16 @@ def test_streaming_tts():
                 "text": test_text,
                 "voice": voice_name,
                 "audio_length": len(audio_content),
-                "streaming": True
+                "streaming": True,
+                "performance": _streaming_performance
             })
         else:
             return jsonify({
                 "success": False,
                 "message": "Streaming TTS test failed",
                 "text": test_text,
-                "voice": voice_name
+                "voice": voice_name,
+                "performance": _streaming_performance
             })
     except Exception as e:
         print(f"❌ Streaming TTS test error: {e}")
@@ -1401,7 +1469,41 @@ def test_streaming_tts():
         return jsonify({
             "success": False,
             "error": str(e),
-            "text": test_text if 'test_text' in locals() else "unknown"
+            "text": test_text if 'test_text' in locals() else "unknown",
+            "performance": _streaming_performance
+        }), 500
+
+@app.route('/api/debug/streaming-performance', methods=['GET'])
+def get_streaming_performance():
+    """Debug endpoint to get streaming TTS performance metrics"""
+    try:
+        global _streaming_performance
+        
+        # Calculate performance metrics
+        metrics = {
+            "total_calls": _streaming_performance["total_calls"],
+            "first_call_time": _streaming_performance["first_call_time"],
+            "subsequent_calls_count": len(_streaming_performance["subsequent_call_times"]),
+            "average_subsequent_time": None,
+            "fastest_subsequent_time": None,
+            "slowest_subsequent_time": None
+        }
+        
+        if _streaming_performance["subsequent_call_times"]:
+            subsequent_times = _streaming_performance["subsequent_call_times"]
+            metrics["average_subsequent_time"] = sum(subsequent_times) / len(subsequent_times)
+            metrics["fastest_subsequent_time"] = min(subsequent_times)
+            metrics["slowest_subsequent_time"] = max(subsequent_times)
+        
+        return jsonify({
+            "success": True,
+            "performance_metrics": metrics,
+            "raw_data": _streaming_performance
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
         }), 500
 
 @app.route('/api/debug/test-case-text', methods=['POST'])
