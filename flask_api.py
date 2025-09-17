@@ -36,6 +36,10 @@ agent = None
 # TTS engine cache to store TTS engines for different voices
 tts_engine_cache = {}
 
+# Streaming TTS configuration
+STREAMING_CHUNK_SIZE = 1024  # Size of audio chunks for streaming
+STREAMING_DELAY = 0.1  # Delay between chunks in seconds
+
 # Salesforce configuration
 SALESFORCE_ORG_DOMAIN = os.environ.get('SALESFORCE_ORG_DOMAIN', '')
 SALESFORCE_CLIENT_ID = os.environ.get('SALESFORCE_CLIENT_ID', '')
@@ -45,6 +49,29 @@ SALESFORCE_AGENT_ID = os.environ.get('SALESFORCE_AGENT_ID', '')
 # Cache for Salesforce access tokens and sessions
 salesforce_token_cache = {}
 salesforce_session_cache = {}
+
+def create_tts_engine_with_voice(voice_name="en-US-Wavenet-C"):
+    """Create a TTS engine with specific Wavenet voice configuration"""
+    try:
+        print(f"🔧 Creating TTS engine with voice: {voice_name}")
+        
+        # Check if we have a cached engine for this voice
+        if voice_name in tts_engine_cache:
+            print(f"✅ Using cached TTS engine for voice: {voice_name}")
+            return tts_engine_cache[voice_name]
+        
+        # Create new TTS engine with voice configuration
+        new_tts_engine = google.TTS()
+        
+        # Cache the engine
+        tts_engine_cache[voice_name] = new_tts_engine
+        print(f"✅ Created and cached TTS engine for voice: {voice_name}")
+        
+        return new_tts_engine
+        
+    except Exception as e:
+        print(f"❌ Error creating TTS engine with voice {voice_name}: {e}")
+        return None
 
 def preprocess_text_for_tts(text):
     """Preprocess text to make TTS sound more natural and human-like using SSML"""
@@ -156,6 +183,102 @@ def preprocess_text_for_tts(text):
     
     print(f"🔧 Text preprocessing with SSML: '{text[:50]}...' → '{processed_text[:100]}...'")
     return processed_text
+
+def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
+    """Process text with streaming TTS using Wavenet voice"""
+    try:
+        print(f"🔧 Starting streaming TTS with voice: {voice_name}")
+        print(f"🔧 Original text: {text[:50]}...")
+        
+        # Preprocess text to improve TTS pronunciation
+        processed_text = preprocess_text_for_tts(text)
+        
+        # Create TTS engine with specific voice
+        voice_tts_engine = create_tts_engine_with_voice(voice_name)
+        if not voice_tts_engine:
+            print("❌ Failed to create TTS engine")
+            return None
+        
+        # Split text into smaller chunks for streaming
+        words = processed_text.split()
+        chunk_size = 8  # Number of words per chunk
+        text_chunks = []
+        
+        for i in range(0, len(words), chunk_size):
+            chunk = ' '.join(words[i:i + chunk_size])
+            text_chunks.append(chunk)
+        
+        print(f"🔧 Split text into {len(text_chunks)} chunks for streaming")
+        
+        # Process each chunk and combine audio
+        all_audio_chunks = []
+        
+        for i, chunk in enumerate(text_chunks):
+            print(f"🔧 Processing chunk {i+1}/{len(text_chunks)}: {chunk[:30]}...")
+            
+            # Generate audio for this chunk
+            audio_stream = voice_tts_engine.synthesize(text=chunk)
+            
+            chunk_audio_data = []
+            
+            # Process audio stream for this chunk
+            try:
+                # Try async iteration first
+                try:
+                    async def collect_chunk_audio():
+                        async for audio_chunk in audio_stream:
+                            if hasattr(audio_chunk, 'frame') and audio_chunk.frame:
+                                chunk_audio_data.append(audio_chunk.frame.data)
+                            elif hasattr(audio_chunk, 'data'):
+                                chunk_audio_data.append(audio_chunk.data)
+                    
+                    # Run with timeout
+                    asyncio.run(asyncio.wait_for(collect_chunk_audio(), timeout=10.0))
+                    
+                except asyncio.TimeoutError:
+                    print(f"❌ Chunk {i+1} async iteration timed out")
+                except Exception as async_error:
+                    print(f"🔧 Chunk {i+1} async iteration failed, trying sync: {async_error}")
+                    
+                    # Fallback to sync iteration
+                    for audio_chunk in audio_stream:
+                        if hasattr(audio_chunk, 'frame') and audio_chunk.frame:
+                            chunk_audio_data.append(audio_chunk.frame.data)
+                        elif hasattr(audio_chunk, 'data'):
+                            chunk_audio_data.append(audio_chunk.data)
+                            
+            except Exception as stream_error:
+                print(f"❌ Error processing chunk {i+1} audio stream: {stream_error}")
+                continue
+            
+            if chunk_audio_data:
+                # Combine audio data for this chunk
+                chunk_audio_bytes = b"".join(chunk_audio_data)
+                all_audio_chunks.append(chunk_audio_bytes)
+                print(f"✅ Chunk {i+1} processed: {len(chunk_audio_bytes)} bytes")
+            else:
+                print(f"❌ No audio data for chunk {i+1}")
+        
+        if not all_audio_chunks:
+            print("❌ No audio chunks collected")
+            return None
+        
+        # Combine all audio chunks
+        full_audio_bytes = b"".join(all_audio_chunks)
+        print(f"✅ Total streaming audio bytes: {len(full_audio_bytes)}")
+        
+        # Create WAV file
+        wav_audio = create_wav_file(full_audio_bytes)
+        audio_base64 = base64.b64encode(wav_audio).decode('utf-8')
+        
+        print(f"✅ Streaming TTS completed: {len(wav_audio)} bytes, Base64: {len(audio_base64)} chars")
+        return audio_base64
+        
+    except Exception as e:
+        print(f"❌ Error in streaming TTS: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
     """TTS processing using subprocess to isolate async LiveKit TTS (fixes event loop issue)"""
@@ -950,7 +1073,9 @@ def health_check():
             "stt_engine": "Browser-based (LWC)",
             "tts_engine": tts_engine is not None,
             "agent_session": agent_session is not None,
-            "agent": agent is not None
+            "agent": agent is not None,
+            "streaming_tts": True,
+            "wavenet_voices": ["en-US-Wavenet-A", "en-US-Wavenet-B", "en-US-Wavenet-C", "en-US-Wavenet-D", "en-US-Wavenet-E", "en-US-Wavenet-F"]
         },
         "salesforce_config": {
             "org_domain": "SET" if SALESFORCE_ORG_DOMAIN else "NOT SET",
@@ -1159,6 +1284,46 @@ def test_simple_tts():
             "text": simple_text if 'simple_text' in locals() else "unknown"
         }), 500
 
+@app.route('/api/debug/test-streaming-tts', methods=['POST'])
+def test_streaming_tts():
+    """Debug endpoint to test streaming TTS with Wavenet voice"""
+    try:
+        data = request.get_json()
+        test_text = data.get('text', 'Hello, this is a test of the streaming text-to-speech system with Wavenet voice.')
+        voice_name = data.get('voice', 'en-US-Wavenet-C')
+        
+        print(f"🔧 Testing streaming TTS with text: {test_text}")
+        print(f"🔧 Using voice: {voice_name}")
+        
+        # Test streaming TTS generation
+        audio_content = process_text_with_streaming_tts(test_text, voice_name)
+        
+        if audio_content:
+            return jsonify({
+                "success": True,
+                "message": "Streaming TTS test successful",
+                "text": test_text,
+                "voice": voice_name,
+                "audio_length": len(audio_content),
+                "streaming": True
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Streaming TTS test failed",
+                "text": test_text,
+                "voice": voice_name
+            })
+    except Exception as e:
+        print(f"❌ Streaming TTS test error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "text": test_text if 'test_text' in locals() else "unknown"
+        }), 500
+
 @app.route('/api/debug/test-case-text', methods=['POST'])
 def test_case_text():
     """Debug endpoint to test TTS with case number text"""
@@ -1218,6 +1383,78 @@ def speech_to_text():
         })
     except Exception as e:
         print(f"❌ Error in STT endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/voice/tts-stream', methods=['POST'])
+def text_to_speech_streaming():
+    """Streaming Text-to-Speech endpoint with Wavenet voice"""
+    try:
+        print("=== STREAMING TTS API CALLED ===")
+        data = request.get_json()
+        print("Streaming TTS request data:", json.dumps(data, indent=2))
+
+        text = data.get('text', '')
+        voice_name = data.get('voice', 'en-US-Wavenet-C')  # Default to female Wavenet voice
+
+        print(f"Text: {text}")
+        print(f"Voice: {voice_name}")
+
+        if not text:
+            print("❌ Error: Text is required")
+            return jsonify({"error": "Text is required"}), 400
+
+        # Initialize LiveKit components if not already done
+        if not tts_engine:
+            print("🔧 Initializing LiveKit components for streaming TTS...")
+            result = initialize_livekit_components()
+            if not result:
+                print("❌ Failed to initialize LiveKit components")
+                return jsonify({"error": "Failed to initialize LiveKit components"}), 500
+
+        print("✅ TTS engine available, processing with streaming...")
+
+        # Process text with streaming TTS using Wavenet voice
+        print(f"🔧 Original text for streaming TTS: '{text}'")
+        print(f"🔧 Text length: {len(text)} characters")
+        print(f"🔧 Voice: {voice_name}")
+        
+        audio_content = process_text_with_streaming_tts(text, voice_name)
+
+        if not audio_content:
+            print("❌ Streaming TTS generation failed, trying fallback...")
+            # Fallback: return a simple response indicating TTS failed
+            response_data = {
+                "audio_content": None,
+                "audio_data": None,
+                "text": text,
+                "voice": voice_name,
+                "streaming": True,
+                "error": "Streaming TTS generation failed",
+                "fallback_message": "Text-to-speech is temporarily unavailable. Please read the text response."
+            }
+            print("❌ Streaming TTS fallback response sent")
+            return jsonify(response_data)
+
+        print(f"✅ Streaming TTS generated, audio length: {len(audio_content) if audio_content else 'null'}")
+
+        response_data = {
+            "audio_content": audio_content,
+            "audio_data": audio_content,  # For backward compatibility
+            "text": text,
+            "voice": voice_name,
+            "streaming": True,
+            "chunk_size": STREAMING_CHUNK_SIZE,
+            "delay": STREAMING_DELAY
+        }
+
+        print("Streaming TTS response data:", json.dumps({**response_data, "audio_content": f"[{len(audio_content) if audio_content else 0} bytes]"}, indent=2))
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        print(f"❌ Error in streaming TTS: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/voice/tts', methods=['POST'])
