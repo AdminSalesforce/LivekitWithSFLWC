@@ -54,7 +54,7 @@ def preprocess_text_for_tts(text):
     import re
     
     # Check if we should use SSML (can be disabled for debugging)
-    use_ssml = os.environ.get('USE_SSML', 'true').lower() == 'true'
+    use_ssml = os.environ.get('USE_SSML', 'false').lower() == 'true'  # Temporarily disable SSML
     
     if not use_ssml:
         print("🔧 SSML disabled, using simple text preprocessing")
@@ -89,6 +89,7 @@ def preprocess_text_for_tts(text):
         processed_text = re.sub(r'\b9\b', 'nine', processed_text)
         
         print(f"🔧 Simple text preprocessing: '{text[:50]}...' → '{processed_text[:50]}...'")
+        print(f"🔧 Full processed text: '{processed_text}'")
         return processed_text
     
     # Start with SSML wrapper
@@ -201,6 +202,8 @@ async def generate_tts():
            text = f.read()
        
        print("🔧 Processing text: " + text[:50] + "...")
+       print("🔧 Full text content: " + text)
+       print("🔧 Text length: " + str(len(text)) + " characters")
        
        if not text.strip():
            print("❌ Empty text provided")
@@ -1156,6 +1159,41 @@ def test_simple_tts():
             "text": simple_text if 'simple_text' in locals() else "unknown"
         }), 500
 
+@app.route('/api/debug/test-case-text', methods=['POST'])
+def test_case_text():
+    """Debug endpoint to test TTS with case number text"""
+    try:
+        # Test with case number text
+        case_text = "The case with number 0001111 was not found."
+        
+        print(f"🔧 Testing TTS with case text: {case_text}")
+        
+        # Test TTS generation
+        audio_content = process_text_with_tts_sync(case_text)
+        
+        if audio_content:
+            return jsonify({
+                "success": True,
+                "message": "Case text TTS test successful",
+                "text": case_text,
+                "audio_length": len(audio_content)
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Case text TTS test failed",
+                "text": case_text
+            })
+    except Exception as e:
+        print(f"❌ Case text TTS test error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "text": case_text if 'case_text' in locals() else "unknown"
+        }), 500
+
 @app.route('/api/voice/stt', methods=['POST'])
 def speech_to_text():
     """Speech-to-Text endpoint - STT is handled by browser in LWC"""
@@ -1213,6 +1251,10 @@ def text_to_speech():
         print("✅ TTS engine available, processing...")
 
         # Process text with TTS using LiveKit directly (matching working code)
+        print(f"🔧 Original text for TTS: '{text}'")
+        print(f"🔧 Text length: {len(text)} characters")
+        print(f"🔧 Text type: {type(text)}")
+        
         audio_content = process_text_with_tts_sync(text, language, voice)
 
         if not audio_content:
