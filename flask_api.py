@@ -184,10 +184,10 @@ def preprocess_text_for_tts(text):
     print(f"🔧 Text preprocessing with SSML: '{text[:50]}...' → '{processed_text[:100]}...'")
     return processed_text
 
-def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
-    """Process text with streaming TTS using Wavenet voice"""
+async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
+    """Async function to generate streaming TTS with proper event loop handling"""
     try:
-        print(f"🔧 Starting streaming TTS with voice: {voice_name}")
+        print(f"🔧 Starting async streaming TTS with voice: {voice_name}")
         print(f"🔧 Original text: {text[:50]}...")
         
         # Preprocess text to improve TTS pronunciation
@@ -223,30 +223,19 @@ def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
             
             # Process audio stream for this chunk
             try:
-                # Try async iteration first
-                try:
-                    async def collect_chunk_audio():
-                        async for audio_chunk in audio_stream:
-                            if hasattr(audio_chunk, 'frame') and audio_chunk.frame:
-                                chunk_audio_data.append(audio_chunk.frame.data)
-                            elif hasattr(audio_chunk, 'data'):
-                                chunk_audio_data.append(audio_chunk.data)
-                    
-                    # Run with timeout
-                    asyncio.run(asyncio.wait_for(collect_chunk_audio(), timeout=10.0))
-                    
-                except asyncio.TimeoutError:
-                    print(f"❌ Chunk {i+1} async iteration timed out")
-                except Exception as async_error:
-                    print(f"🔧 Chunk {i+1} async iteration failed, trying sync: {async_error}")
-                    
-                    # Fallback to sync iteration
-                    for audio_chunk in audio_stream:
+                # Use async iteration with timeout
+                async def collect_chunk_audio():
+                    async for audio_chunk in audio_stream:
                         if hasattr(audio_chunk, 'frame') and audio_chunk.frame:
                             chunk_audio_data.append(audio_chunk.frame.data)
                         elif hasattr(audio_chunk, 'data'):
                             chunk_audio_data.append(audio_chunk.data)
-                            
+                
+                # Run with timeout
+                await asyncio.wait_for(collect_chunk_audio(), timeout=10.0)
+                
+            except asyncio.TimeoutError:
+                print(f"❌ Chunk {i+1} async iteration timed out")
             except Exception as stream_error:
                 print(f"❌ Error processing chunk {i+1} audio stream: {stream_error}")
                 continue
@@ -275,7 +264,33 @@ def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
         return audio_base64
         
     except Exception as e:
-        print(f"❌ Error in streaming TTS: {e}")
+        print(f"❌ Error in async streaming TTS: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
+    """Process text with streaming TTS using proper event loop handling"""
+    try:
+        print(f"🔧 Starting streaming TTS with voice: {voice_name}")
+        print(f"🔧 Original text: {text[:50]}...")
+        
+        # Method 3: Flask with proper event loop management
+        # Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Run the async function in the new event loop
+            result = loop.run_until_complete(generate_streaming_tts_async(text, voice_name))
+            return result
+        finally:
+            # Clean up the event loop
+            loop.close()
+        
+    except Exception as e:
+        print(f"❌ Error in process_text_with_streaming_tts: {e}")
+        logger.error("Error in process_text_with_streaming_tts: %s", e)
         import traceback
         traceback.print_exc()
         return None
