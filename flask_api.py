@@ -217,36 +217,70 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
             print(f"🔧 Processing chunk {i+1}/{len(text_chunks)}: {chunk[:30]}...")
             
             # Generate audio for this chunk
-            audio_stream = voice_tts_engine.synthesize(text=chunk)
-            
-            chunk_audio_data = []
-            
-            # Process audio stream for this chunk
+            audio_stream = None
             try:
-                # Use async iteration with timeout
-                async def collect_chunk_audio():
-                    async for audio_chunk in audio_stream:
-                        if hasattr(audio_chunk, 'frame') and audio_chunk.frame:
-                            chunk_audio_data.append(audio_chunk.frame.data)
-                        elif hasattr(audio_chunk, 'data'):
-                            chunk_audio_data.append(audio_chunk.data)
+                audio_stream = voice_tts_engine.synthesize(text=chunk)
+                chunk_audio_data = []
                 
-                # Run with timeout
-                await asyncio.wait_for(collect_chunk_audio(), timeout=10.0)
+                # Process audio stream for this chunk with proper error handling
+                try:
+                    # Use async iteration with timeout and proper cleanup
+                    def create_collect_chunk_audio(stream, data_list, chunk_index):
+                        async def collect_chunk_audio():
+                            try:
+                                async for audio_chunk in stream:
+                                    if hasattr(audio_chunk, 'frame') and audio_chunk.frame:
+                                        data_list.append(audio_chunk.frame.data)
+                                    elif hasattr(audio_chunk, 'data'):
+                                        data_list.append(audio_chunk.data)
+                            except AttributeError as attr_error:
+                                # Handle the specific gRPC InterceptedUnaryUnaryCall error
+                                if "_interceptors_task" in str(attr_error):
+                                    print(f"🔧 Handling gRPC cleanup error for chunk {chunk_index+1}: {attr_error}")
+                                    # This is a known gRPC cleanup issue, not critical
+                                else:
+                                    raise attr_error
+                            except Exception as e:
+                                print(f"🔧 Error in chunk {chunk_index+1} audio collection: {e}")
+                                raise e
+                        return collect_chunk_audio
+                    
+                    collect_func = create_collect_chunk_audio(audio_stream, chunk_audio_data, i)
+                    
+                    # Run with timeout
+                    await asyncio.wait_for(collect_func(), timeout=10.0)
+                    
+                except asyncio.TimeoutError:
+                    print(f"❌ Chunk {i+1} async iteration timed out")
+                except AttributeError as attr_error:
+                    if "_interceptors_task" in str(attr_error):
+                        print(f"🔧 gRPC cleanup error for chunk {i+1} (non-critical): {attr_error}")
+                        # Continue processing as this is just a cleanup issue
+                    else:
+                        print(f"❌ Attribute error processing chunk {i+1}: {attr_error}")
+                        continue
+                except Exception as stream_error:
+                    print(f"❌ Error processing chunk {i+1} audio stream: {stream_error}")
+                    continue
+                finally:
+                    # Ensure proper cleanup of audio stream
+                    try:
+                        if audio_stream and hasattr(audio_stream, 'cancel'):
+                            audio_stream.cancel()
+                    except Exception as cleanup_error:
+                        print(f"🔧 Cleanup error for chunk {i+1} (non-critical): {cleanup_error}")
                 
-            except asyncio.TimeoutError:
-                print(f"❌ Chunk {i+1} async iteration timed out")
-            except Exception as stream_error:
-                print(f"❌ Error processing chunk {i+1} audio stream: {stream_error}")
+                if chunk_audio_data:
+                    # Combine audio data for this chunk
+                    chunk_audio_bytes = b"".join(chunk_audio_data)
+                    all_audio_chunks.append(chunk_audio_bytes)
+                    print(f"✅ Chunk {i+1} processed: {len(chunk_audio_bytes)} bytes")
+                else:
+                    print(f"❌ No audio data for chunk {i+1}")
+                    
+            except Exception as chunk_error:
+                print(f"❌ Error creating audio stream for chunk {i+1}: {chunk_error}")
                 continue
-            
-            if chunk_audio_data:
-                # Combine audio data for this chunk
-                chunk_audio_bytes = b"".join(chunk_audio_data)
-                all_audio_chunks.append(chunk_audio_bytes)
-                print(f"✅ Chunk {i+1} processed: {len(chunk_audio_bytes)} bytes")
-            else:
-                print(f"❌ No audio data for chunk {i+1}")
         
         if not all_audio_chunks:
             print("❌ No audio chunks collected")
@@ -275,18 +309,49 @@ def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
         print(f"🔧 Starting streaming TTS with voice: {voice_name}")
         print(f"🔧 Original text: {text[:50]}...")
         
-        # Method 3: Flask with proper event loop management
-        # Create a new event loop for this thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
+        # Method 1: Try async streaming TTS first
         try:
-            # Run the async function in the new event loop
-            result = loop.run_until_complete(generate_streaming_tts_async(text, voice_name))
-            return result
-        finally:
-            # Clean up the event loop
-            loop.close()
+            # Create a new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Run the async function in the new event loop
+                result = loop.run_until_complete(generate_streaming_tts_async(text, voice_name))
+                if result:
+                    print("✅ Async streaming TTS completed successfully")
+                    return result
+                else:
+                    print("❌ Async streaming TTS returned None, trying fallback...")
+            finally:
+                # Clean up the event loop
+                loop.close()
+                
+        except AttributeError as attr_error:
+            if "_interceptors_task" in str(attr_error):
+                print(f"🔧 gRPC cleanup error in async streaming (non-critical): {attr_error}")
+                print("🔧 Trying subprocess fallback...")
+            else:
+                print(f"❌ Attribute error in async streaming: {attr_error}")
+                print("🔧 Trying subprocess fallback...")
+        except Exception as async_error:
+            print(f"❌ Error in async streaming TTS: {async_error}")
+            print("🔧 Trying subprocess fallback...")
+        
+        # Method 2: Fallback to subprocess approach for gRPC issues
+        print("🔧 Using subprocess fallback for streaming TTS...")
+        try:
+            # Use the existing subprocess TTS method as fallback
+            fallback_result = process_text_with_tts_sync(text, 'en-US', voice_name)
+            if fallback_result:
+                print("✅ Subprocess fallback TTS completed successfully")
+                return fallback_result
+            else:
+                print("❌ Subprocess fallback also failed")
+                return None
+        except Exception as subprocess_error:
+            print(f"❌ Error in subprocess fallback: {subprocess_error}")
+            return None
         
     except Exception as e:
         print(f"❌ Error in process_text_with_streaming_tts: {e}")
@@ -1433,7 +1498,23 @@ def text_to_speech_streaming():
         print(f"🔧 Text length: {len(text)} characters")
         print(f"🔧 Voice: {voice_name}")
         
-        audio_content = process_text_with_streaming_tts(text, voice_name)
+        try:
+            audio_content = process_text_with_streaming_tts(text, voice_name)
+        except AttributeError as attr_error:
+            if "_interceptors_task" in str(attr_error):
+                print(f"🔧 gRPC cleanup error in streaming TTS (non-critical): {attr_error}")
+                print("🔧 This is a known gRPC cleanup issue, continuing...")
+                # Try to get audio content anyway, as the error might be non-critical
+                try:
+                    audio_content = process_text_with_streaming_tts(text, voice_name)
+                except:
+                    audio_content = None
+            else:
+                print(f"❌ Attribute error in streaming TTS: {attr_error}")
+                audio_content = None
+        except Exception as e:
+            print(f"❌ Error in streaming TTS processing: {e}")
+            audio_content = None
 
         if not audio_content:
             print("❌ Streaming TTS generation failed, trying fallback...")
