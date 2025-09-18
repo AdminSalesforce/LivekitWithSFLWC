@@ -291,11 +291,11 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
             # Generate audio for this chunk
             audio_stream = None
             try:
-                # Check if chunk contains SSML tags
+                # LiveKit TTS doesn't support SSML parameter, use text parameter for all content
                 if '<speak>' in chunk or '<say-as' in chunk or '<break' in chunk or '<emphasis' in chunk:
-                    print(f"🔧 Processing SSML chunk: {chunk[:100]}...")
-                    # Use SSML input for LiveKit TTS
-                    audio_stream = voice_tts_engine.synthesize(ssml=chunk)
+                    print(f"🔧 Processing SSML chunk as text: {chunk[:100]}...")
+                    # LiveKit TTS should handle SSML automatically when passed as text
+                    audio_stream = voice_tts_engine.synthesize(text=chunk)
                 else:
                     print(f"🔧 Processing plain text chunk: {chunk[:100]}...")
                     # Use regular text input
@@ -550,10 +550,11 @@ async def generate_tts():
        print("🔧 Calling tts_engine.synthesize()...")
        print("🔧 Input text: " + text[:200] + "...")
        
-       # Check if text contains SSML tags and use appropriate input type
+       # LiveKit TTS doesn't support SSML parameter, use text parameter for all content
        if '<speak>' in text or '<say-as' in text or '<break' in text or '<emphasis' in text:
-           print("🔧 Processing SSML input...")
-           audio_stream = tts_engine.synthesize(ssml=text)
+           print("🔧 Processing SSML input as text...")
+           # LiveKit TTS should handle SSML automatically when passed as text
+           audio_stream = tts_engine.synthesize(text=text)
        else:
            print("🔧 Processing plain text input...")
            audio_stream = tts_engine.synthesize(text=text)
@@ -738,10 +739,11 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
         print(f"🔧 Preprocessed text in async: {processed_text[:200]}...")
 
         # Process text using LiveKit TTS directly
-        # Check if text contains SSML tags and use appropriate input type
+        # LiveKit TTS doesn't support SSML parameter, use text parameter for all content
         if '<speak>' in processed_text or '<say-as' in processed_text or '<break' in processed_text or '<emphasis' in processed_text:
-            print("🔧 Processing SSML input in async function...")
-            audio_stream = tts_engine.synthesize(ssml=processed_text)
+            print("🔧 Processing SSML input as text in async function...")
+            # LiveKit TTS should handle SSML automatically when passed as text
+            audio_stream = tts_engine.synthesize(text=processed_text)
         else:
             print("🔧 Processing plain text input in async function...")
             audio_stream = tts_engine.synthesize(text=processed_text)
