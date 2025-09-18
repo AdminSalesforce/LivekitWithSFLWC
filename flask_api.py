@@ -110,7 +110,7 @@ def create_tts_engine_with_voice(voice_name="en-US-Wavenet-C"):
         return None
 
 def convert_text_to_ssml(text):
-    """Convert text to SSML for Google Cloud TTS - only fix zero pronunciation"""
+    """Convert text to SSML for Google Cloud TTS - zero fix, dates, and currency only"""
     if not text:
         return text
     
@@ -123,7 +123,7 @@ def convert_text_to_ssml(text):
         text = text[:MAX_TTS_LENGTH] + "..."
         print(f"🔧 Truncated text: {text[:100]}...")
     
-    print(f"🔧 Converting text to SSML (zero fix only): {text[:100]}...")
+    print(f"🔧 Converting text to SSML (zero, dates, currency): {text[:100]}...")
     
     # Start with the original text
     processed_text = text.strip()
@@ -134,17 +134,25 @@ def convert_text_to_ssml(text):
     processed_text = re.sub(r'\boh oh oh\b', 'zero zero zero', processed_text, flags=re.IGNORECASE)
     processed_text = re.sub(r'\boh oh oh oh\b', 'zero zero zero zero', processed_text, flags=re.IGNORECASE)
     
-    # Step 2: Handle numbers - wrap with say-as for cardinal interpretation
+    # Step 2: Handle currency (before numbers to avoid conflicts)
+    currency_pattern = r'\$(\d+(?:\.\d+)?)'
+    processed_text = re.sub(currency_pattern, r'<say-as interpret-as="currency">$\1</say-as>', processed_text)
+    
+    # Step 3: Handle dates (before numbers to avoid conflicts)
+    date_pattern = r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b'
+    processed_text = re.sub(date_pattern, r'<say-as interpret-as="date" format="mdy">\1/\2/\3</say-as>', processed_text)
+    
+    # Step 4: Handle numbers - wrap with say-as for cardinal interpretation
     # This ensures "0" is pronounced as "zero" not "oh"
     processed_text = re.sub(r'\b(\d+)\b', r'<say-as interpret-as="cardinal">\1</say-as>', processed_text)
     
-    # Step 3: Wrap in speak tags
+    # Step 5: Wrap in speak tags
     processed_text = f"<speak>{processed_text.strip()}</speak>"
     
-    # Step 4: Clean up multiple spaces
+    # Step 6: Clean up multiple spaces
     processed_text = re.sub(r'\s+', ' ', processed_text)
     
-    print(f"🔧 Final SSML (zero fix): {processed_text[:200]}...")
+    print(f"🔧 Final SSML (zero, dates, currency): {processed_text[:200]}...")
     return processed_text
 
 def preprocess_text_for_tts(text):
