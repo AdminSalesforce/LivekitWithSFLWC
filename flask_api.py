@@ -120,8 +120,8 @@ def preprocess_text_for_tts(text):
         text = text[:MAX_TTS_LENGTH] + "..."
         print(f"🔧 Truncated text: {text[:100]}...")
     
-    # Check if we should use SSML (can be disabled for debugging)
-    use_ssml = os.environ.get('USE_SSML', 'true').lower() == 'true'  # Enable SSML for better pronunciation
+    # Check if we should use SSML (disabled by default since LiveKit TTS doesn't support it)
+    use_ssml = os.environ.get('USE_SSML', 'false').lower() == 'true'  # Disable SSML since LiveKit TTS doesn't support it
     
     if not use_ssml:
         print("🔧 SSML disabled, using simple text preprocessing")
@@ -262,23 +262,15 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
             print("❌ Failed to create TTS engine")
             return None
         
-        # Check if processed text contains SSML tags
-        is_ssml = '<speak>' in processed_text or '<say-as' in processed_text or '<break' in processed_text or '<emphasis' in processed_text
+        # Split plain text into smaller chunks for streaming
+        print("🔧 Plain text detected - splitting into chunks for streaming")
+        words = processed_text.split()
+        chunk_size = 8  # Number of words per chunk
+        text_chunks = []
         
-        if is_ssml:
-            print("🔧 SSML detected - processing as single chunk to preserve structure")
-            # For SSML, process as a single chunk to preserve structure
-            text_chunks = [processed_text]
-        else:
-            print("🔧 Plain text detected - splitting into chunks for streaming")
-            # Split plain text into smaller chunks for streaming
-            words = processed_text.split()
-            chunk_size = 8  # Number of words per chunk
-            text_chunks = []
-            
-            for i in range(0, len(words), chunk_size):
-                chunk = ' '.join(words[i:i + chunk_size])
-                text_chunks.append(chunk)
+        for i in range(0, len(words), chunk_size):
+            chunk = ' '.join(words[i:i + chunk_size])
+            text_chunks.append(chunk)
         
         print(f"🔧 Processing {len(text_chunks)} chunk(s) for streaming")
         
@@ -291,15 +283,9 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
             # Generate audio for this chunk
             audio_stream = None
             try:
-                # LiveKit TTS doesn't support SSML parameter, use text parameter for all content
-                if '<speak>' in chunk or '<say-as' in chunk or '<break' in chunk or '<emphasis' in chunk:
-                    print(f"🔧 Processing SSML chunk as text: {chunk[:100]}...")
-                    # LiveKit TTS should handle SSML automatically when passed as text
-                    audio_stream = voice_tts_engine.synthesize(text=chunk)
-                else:
-                    print(f"🔧 Processing plain text chunk: {chunk[:100]}...")
-                    # Use regular text input
-                    audio_stream = voice_tts_engine.synthesize(text=chunk)
+                # Process plain text chunk
+                print(f"🔧 Processing plain text chunk: {chunk[:100]}...")
+                audio_stream = voice_tts_engine.synthesize(text=chunk)
                 chunk_audio_data = []
                 
                 # Process audio stream for this chunk with proper error handling
@@ -550,14 +536,9 @@ async def generate_tts():
        print("🔧 Calling tts_engine.synthesize()...")
        print("🔧 Input text: " + text[:200] + "...")
        
-       # LiveKit TTS doesn't support SSML parameter, use text parameter for all content
-       if '<speak>' in text or '<say-as' in text or '<break' in text or '<emphasis' in text:
-           print("🔧 Processing SSML input as text...")
-           # LiveKit TTS should handle SSML automatically when passed as text
-           audio_stream = tts_engine.synthesize(text=text)
-       else:
-           print("🔧 Processing plain text input...")
-           audio_stream = tts_engine.synthesize(text=text)
+       # Process plain text input
+       print("🔧 Processing plain text input...")
+       audio_stream = tts_engine.synthesize(text=text)
        
        print("✅ Audio stream created")
        
@@ -739,14 +720,8 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
         print(f"🔧 Preprocessed text in async: {processed_text[:200]}...")
 
         # Process text using LiveKit TTS directly
-        # LiveKit TTS doesn't support SSML parameter, use text parameter for all content
-        if '<speak>' in processed_text or '<say-as' in processed_text or '<break' in processed_text or '<emphasis' in processed_text:
-            print("🔧 Processing SSML input as text in async function...")
-            # LiveKit TTS should handle SSML automatically when passed as text
-            audio_stream = tts_engine.synthesize(text=processed_text)
-        else:
-            print("🔧 Processing plain text input in async function...")
-            audio_stream = tts_engine.synthesize(text=processed_text)
+        print("🔧 Processing plain text input in async function...")
+        audio_stream = tts_engine.synthesize(text=processed_text)
 
         audio_chunks = []
 
