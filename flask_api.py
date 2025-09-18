@@ -113,6 +113,13 @@ def preprocess_text_for_tts(text):
     
     import re
     
+    # Check text length to prevent size limit errors
+    MAX_TTS_LENGTH = 4000  # Maximum characters for TTS (conservative limit)
+    if len(text) > MAX_TTS_LENGTH:
+        print(f"⚠️ Text too long for TTS ({len(text)} chars), truncating to {MAX_TTS_LENGTH} chars")
+        text = text[:MAX_TTS_LENGTH] + "..."
+        print(f"🔧 Truncated text: {text[:100]}...")
+    
     # Check if we should use SSML (can be disabled for debugging)
     use_ssml = os.environ.get('USE_SSML', 'true').lower() == 'true'  # Enable SSML for better pronunciation
     
@@ -236,9 +243,18 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
     try:
         print(f"🔧 Starting async streaming TTS with voice: {voice_name}")
         print(f"🔧 Original text: {text[:50]}...")
+        print(f"🔧 Text length: {len(text)} characters")
         
-        # Preprocess text to improve TTS pronunciation
-        processed_text = preprocess_text_for_tts(text)
+        # Check text length before processing
+        MAX_TTS_LENGTH = 4000  # Maximum characters for TTS
+        if len(text) > MAX_TTS_LENGTH:
+            print(f"⚠️ Text too long for TTS ({len(text)} chars), truncating to {MAX_TTS_LENGTH} chars")
+            text = text[:MAX_TTS_LENGTH] + "..."
+            print(f"🔧 Truncated text: {text[:100]}...")
+        
+       # Preprocess text to improve TTS pronunciation
+       processed_text = preprocess_text_for_tts(text)
+       print(f"🔧 Preprocessed text: {processed_text[:200]}...")
         
         # Create TTS engine with specific voice
         voice_tts_engine = create_tts_engine_with_voice(voice_name)
@@ -246,16 +262,25 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
             print("❌ Failed to create TTS engine")
             return None
         
-        # Split text into smaller chunks for streaming
-        words = processed_text.split()
-        chunk_size = 8  # Number of words per chunk
-        text_chunks = []
+        # Check if processed text contains SSML tags
+        is_ssml = '<speak>' in processed_text or '<say-as' in processed_text or '<break' in processed_text or '<emphasis' in processed_text
         
-        for i in range(0, len(words), chunk_size):
-            chunk = ' '.join(words[i:i + chunk_size])
-            text_chunks.append(chunk)
+        if is_ssml:
+            print("🔧 SSML detected - processing as single chunk to preserve structure")
+            # For SSML, process as a single chunk to preserve structure
+            text_chunks = [processed_text]
+        else:
+            print("🔧 Plain text detected - splitting into chunks for streaming")
+            # Split plain text into smaller chunks for streaming
+            words = processed_text.split()
+            chunk_size = 8  # Number of words per chunk
+            text_chunks = []
+            
+            for i in range(0, len(words), chunk_size):
+                chunk = ' '.join(words[i:i + chunk_size])
+                text_chunks.append(chunk)
         
-        print(f"🔧 Split text into {len(text_chunks)} chunks for streaming")
+        print(f"🔧 Processing {len(text_chunks)} chunk(s) for streaming")
         
         # Process each chunk and combine audio
         all_audio_chunks = []
@@ -266,7 +291,15 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
             # Generate audio for this chunk
             audio_stream = None
             try:
-                audio_stream = voice_tts_engine.synthesize(text=chunk)
+                # Check if chunk contains SSML tags
+                if '<speak>' in chunk or '<say-as' in chunk or '<break' in chunk or '<emphasis' in chunk:
+                    print(f"🔧 Processing SSML chunk: {chunk[:100]}...")
+                    # Use SSML input for LiveKit TTS
+                    audio_stream = voice_tts_engine.synthesize(ssml=chunk)
+                else:
+                    print(f"🔧 Processing plain text chunk: {chunk[:100]}...")
+                    # Use regular text input
+                    audio_stream = voice_tts_engine.synthesize(text=chunk)
                 chunk_audio_data = []
                 
                 # Process audio stream for this chunk with proper error handling
@@ -459,6 +492,14 @@ def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
         print("🔧 process_text_with_tts_sync FUNCTION CALLED")
         print(f"🔧 Original text: {text[:50]}...")
         print(f"🔧 Language: {language}, Voice: {voice}")
+        print(f"🔧 Text length: {len(text)} characters")
+        
+        # Check text length before processing
+        MAX_TTS_LENGTH = 4000  # Maximum characters for TTS
+        if len(text) > MAX_TTS_LENGTH:
+            print(f"⚠️ Text too long for TTS ({len(text)} chars), truncating to {MAX_TTS_LENGTH} chars")
+            text = text[:MAX_TTS_LENGTH] + "..."
+            print(f"🔧 Truncated text: {text[:100]}...")
         
         # Preprocess text to improve TTS pronunciation (fixes "0" → "o" issue)
         processed_text = preprocess_text_for_tts(text)
@@ -509,8 +550,13 @@ async def generate_tts():
        print("🔧 Calling tts_engine.synthesize()...")
        print("🔧 Input text: " + text[:200] + "...")
        
-       # LiveKit TTS handles SSML automatically when text contains SSML tags
-       audio_stream = tts_engine.synthesize(text=text)
+       # Check if text contains SSML tags and use appropriate input type
+       if '<speak>' in text or '<say-as' in text or '<break' in text or '<emphasis' in text:
+           print("🔧 Processing SSML input...")
+           audio_stream = tts_engine.synthesize(ssml=text)
+       else:
+           print("🔧 Processing plain text input...")
+           audio_stream = tts_engine.synthesize(text=text)
        
        print("✅ Audio stream created")
        
@@ -674,13 +720,31 @@ async def process_text_with_tts_async(text, language='en-US', voice='en-US-Waven
     """Async TTS processing using LiveKit directly"""
     try:
         print(f"🔧 Async TTS processing for text: {text[:50]}...")
+        print(f"🔧 Text length: {len(text)} characters")
 
         if not tts_engine:
             print("❌ TTS engine not available in async function")
             return None
 
+        # Check text length before processing
+        MAX_TTS_LENGTH = 4000  # Maximum characters for TTS
+        if len(text) > MAX_TTS_LENGTH:
+            print(f"⚠️ Text too long for TTS ({len(text)} chars), truncating to {MAX_TTS_LENGTH} chars")
+            text = text[:MAX_TTS_LENGTH] + "..."
+            print(f"🔧 Truncated text: {text[:100]}...")
+
+        # Preprocess text to improve TTS pronunciation
+        processed_text = preprocess_text_for_tts(text)
+        print(f"🔧 Preprocessed text in async: {processed_text[:200]}...")
+
         # Process text using LiveKit TTS directly
-        audio_stream = tts_engine.synthesize(text=text)
+        # Check if text contains SSML tags and use appropriate input type
+        if '<speak>' in processed_text or '<say-as' in processed_text or '<break' in processed_text or '<emphasis' in processed_text:
+            print("🔧 Processing SSML input in async function...")
+            audio_stream = tts_engine.synthesize(ssml=processed_text)
+        else:
+            print("🔧 Processing plain text input in async function...")
+            audio_stream = tts_engine.synthesize(text=processed_text)
 
         audio_chunks = []
 
