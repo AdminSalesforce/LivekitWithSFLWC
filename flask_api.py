@@ -197,20 +197,17 @@ def preprocess_text_for_tts(text):
     # Handle percentages
     processed_text = re.sub(r'(\d+(?:\.\d+)?)%', r'<say-as interpret-as="number">\1</say-as> percent', processed_text)
     
-    # Handle case numbers and IDs (like "0001111") - use characters for better pronunciation
-    # Use negative lookbehind to avoid matching already-tagged numbers
-    processed_text = re.sub(r'(?<!<say-as[^>]*>)\b(\d{4,})\b', r'<say-as interpret-as="characters">\1</say-as>', processed_text)
-    
-    # Handle single and double digit numbers (use cardinal for these)
-    # Use negative lookbehind to avoid matching already-tagged numbers
-    processed_text = re.sub(r'(?<!<say-as[^>]*>)\b(\d{1,3})\b', r'<say-as interpret-as="cardinal">\1</say-as>', processed_text)
+    # Handle numbers - use a simple approach to avoid regex complexity
+    # First, let's handle all numbers with a basic cardinal interpretation
+    # This is simpler and avoids the lookbehind issues
+    processed_text = re.sub(r'\b(\d+)\b', r'<say-as interpret-as="cardinal">\1</say-as>', processed_text)
     
     # Add natural emphasis for important words using SSML
     emphasis_words = ['important', 'urgent', 'critical', 'error', 'success', 'warning', 'note', 'failed', 'completed', 'pending']
     for word in emphasis_words:
         if word in processed_text.lower():
-            # Use SSML emphasis tag with negative lookbehind to avoid nested tags
-            processed_text = re.sub(rf'(?<!<emphasis[^>]*>)\b{word}\b', f'<emphasis level="strong">{word}</emphasis>', processed_text, flags=re.IGNORECASE)
+            # Use SSML emphasis tag - simple approach without lookbehind
+            processed_text = re.sub(rf'\b{word}\b', f'<emphasis level="strong">{word}</emphasis>', processed_text, flags=re.IGNORECASE)
     
     # Add natural pauses for better flow (BEFORE wrapping in <speak>)
     processed_text = processed_text.replace('.', '. ')  # Pause after periods
