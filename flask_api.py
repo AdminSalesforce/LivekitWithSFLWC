@@ -95,7 +95,7 @@ def preprocess_text_for_tts(text):
     import re
     
     # Check if we should use SSML (can be disabled for debugging)
-    use_ssml = os.environ.get('USE_SSML', 'false').lower() == 'true'  # Temporarily disable SSML
+    use_ssml = os.environ.get('USE_SSML', 'true').lower() == 'true'  # Enable SSML for better pronunciation
     
     if not use_ssml:
         print("🔧 SSML disabled, using simple text preprocessing")
@@ -133,38 +133,22 @@ def preprocess_text_for_tts(text):
         print(f"🔧 Full processed text: '{processed_text}'")
         return processed_text
     
-    # Start with SSML wrapper
-    processed_text = f"<speak>{text}</speak>"
+    # Start with text processing (don't wrap in <speak> yet)
+    processed_text = text
     
-    # Add natural pauses and emphasis for better flow
-    processed_text = processed_text.replace('.', '. ')  # Pause after periods
-    processed_text = processed_text.replace('!', '! ')  # Pause after exclamations
-    processed_text = processed_text.replace('?', '? ')  # Pause after questions
-    processed_text = processed_text.replace(',', ', ')  # Pause after commas
+    # Fix "oh" -> "zero" pronunciation issue first
+    # This is a common TTS issue where "oh" is pronounced instead of "zero"
+    original_text = processed_text
+    processed_text = re.sub(r'\boh\b', 'zero', processed_text, flags=re.IGNORECASE)
+    processed_text = re.sub(r'\boh oh\b', 'zero zero', processed_text, flags=re.IGNORECASE)
+    processed_text = re.sub(r'\boh oh oh\b', 'zero zero zero', processed_text, flags=re.IGNORECASE)
+    processed_text = re.sub(r'\boh oh oh oh\b', 'zero zero zero zero', processed_text, flags=re.IGNORECASE)
     
-    # Use SSML for better number pronunciation
-    # Replace standalone numbers with SSML say-as cardinal
-    processed_text = re.sub(r'\b(\d+)\b', r'<say-as interpret-as="cardinal">\1</say-as>', processed_text)
+    # Log if "oh" was converted to "zero"
+    if original_text != processed_text:
+        print(f"🔧 SSML: Fixed 'oh' -> 'zero' pronunciation: '{original_text}' -> '{processed_text}'")
     
-    # Handle case numbers and IDs (like "0001111") - use characters for better pronunciation
-    processed_text = re.sub(r'\b(\d{4,})\b', r'<say-as interpret-as="characters">\1</say-as>', processed_text)
-    
-    # Handle currency amounts
-    processed_text = re.sub(r'\$(\d+(?:\.\d{2})?)', r'<say-as interpret-as="currency" currency="USD">$\1</say-as>', processed_text)
-    
-    # Handle dates (MM/DD/YYYY or DD/MM/YYYY format)
-    processed_text = re.sub(r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', r'<say-as interpret-as="date" format="mdy">\1/\2/\3</say-as>', processed_text)
-    
-    # Handle time (HH:MM format)
-    processed_text = re.sub(r'\b(\d{1,2}):(\d{2})\b', r'<say-as interpret-as="time" format="hms12">\1:\2</say-as>', processed_text)
-    
-    # Handle percentages
-    processed_text = re.sub(r'(\d+(?:\.\d+)?)%', r'<say-as interpret-as="number">\1</say-as> percent', processed_text)
-    
-    # Handle phone numbers (XXX-XXX-XXXX format)
-    processed_text = re.sub(r'\b(\d{3})-(\d{3})-(\d{4})\b', r'<say-as interpret-as="telephone">\1-\2-\3</say-as>', processed_text)
-    
-    # Add natural speech patterns with SSML
+    # Add natural speech patterns with contractions
     processed_text = processed_text.replace('I am', "I'm")
     processed_text = processed_text.replace('I will', "I'll")
     processed_text = processed_text.replace('I have', "I've")
@@ -179,21 +163,54 @@ def preprocess_text_for_tts(text):
     processed_text = processed_text.replace('would not', "wouldn't")
     processed_text = processed_text.replace('could not', "couldn't")
     
+    # Handle phone numbers (XXX-XXX-XXXX format) - use characters for Google TTS
+    processed_text = re.sub(r'\b(\d{3})-(\d{3})-(\d{4})\b', r'<say-as interpret-as="characters">\1-\2-\3</say-as>', processed_text)
+    
+    # Handle currency amounts (support any number of decimal places)
+    processed_text = re.sub(r'\$(\d+(?:\.\d+)?)', r'<say-as interpret-as="currency">$\1</say-as>', processed_text)
+    
+    # Handle dates (MM/DD/YYYY or DD/MM/YYYY format)
+    processed_text = re.sub(r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', r'<say-as interpret-as="date" format="mdy">\1/\2/\3</say-as>', processed_text)
+    
+    # Handle time (HH:MM format)
+    processed_text = re.sub(r'\b(\d{1,2}):(\d{2})\b', r'<say-as interpret-as="time" format="hms12">\1:\2</say-as>', processed_text)
+    
+    # Handle percentages
+    processed_text = re.sub(r'(\d+(?:\.\d+)?)%', r'<say-as interpret-as="number">\1</say-as> percent', processed_text)
+    
+    # Handle case numbers and IDs (like "0001111") - use characters for better pronunciation
+    # Use negative lookbehind to avoid matching already-tagged numbers
+    processed_text = re.sub(r'(?<!<say-as[^>]*>)\b(\d{4,})\b', r'<say-as interpret-as="characters">\1</say-as>', processed_text)
+    
+    # Handle single and double digit numbers (use cardinal for these)
+    # Use negative lookbehind to avoid matching already-tagged numbers
+    processed_text = re.sub(r'(?<!<say-as[^>]*>)\b(\d{1,3})\b', r'<say-as interpret-as="cardinal">\1</say-as>', processed_text)
+    
     # Add natural emphasis for important words using SSML
     emphasis_words = ['important', 'urgent', 'critical', 'error', 'success', 'warning', 'note', 'failed', 'completed', 'pending']
     for word in emphasis_words:
         if word in processed_text.lower():
-            # Use SSML emphasis tag
-            processed_text = re.sub(rf'\b{word}\b', f'<emphasis level="strong">{word}</emphasis>', processed_text, flags=re.IGNORECASE)
+            # Use SSML emphasis tag with negative lookbehind to avoid nested tags
+            processed_text = re.sub(rf'(?<!<emphasis[^>]*>)\b{word}\b', f'<emphasis level="strong">{word}</emphasis>', processed_text, flags=re.IGNORECASE)
     
-    # Add breaks for better pacing
-    processed_text = processed_text.replace('. ', '<break time="500ms"/>')
-    processed_text = processed_text.replace('! ', '<break time="500ms"/>')
-    processed_text = processed_text.replace('? ', '<break time="500ms"/>')
-    processed_text = processed_text.replace(', ', '<break time="250ms"/>')
+    # Add natural pauses for better flow (BEFORE wrapping in <speak>)
+    processed_text = processed_text.replace('.', '. ')  # Pause after periods
+    processed_text = processed_text.replace('!', '! ')  # Pause after exclamations
+    processed_text = processed_text.replace('?', '? ')  # Pause after questions
+    processed_text = processed_text.replace(',', ', ')  # Pause after commas
     
-    # Clean up multiple spaces and ensure proper SSML structure
-    processed_text = ' '.join(processed_text.split())
+    # Convert punctuation to breaks BEFORE wrapping in <speak>
+    processed_text = processed_text.replace('. ', '<break time="500ms"/> ')
+    processed_text = processed_text.replace('! ', '<break time="500ms"/> ')
+    processed_text = processed_text.replace('? ', '<break time="500ms"/> ')
+    processed_text = processed_text.replace(', ', '<break time="250ms"/> ')
+    
+    # Now wrap in SSML speak tags (after all processing)
+    processed_text = f"<speak>{processed_text.strip()}</speak>"
+    
+    # Clean up multiple spaces but preserve spacing inside SSML tags
+    # Use regex to normalize spaces only outside of tags
+    processed_text = re.sub(r'(?<!>)\s+(?![^<]*>)', ' ', processed_text)
     
     print(f"🔧 Text preprocessing with SSML: '{text[:50]}...' → '{processed_text[:100]}...'")
     return processed_text
