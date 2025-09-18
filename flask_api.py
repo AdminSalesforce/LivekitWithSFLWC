@@ -139,16 +139,43 @@ def convert_text_to_ssml(text):
     processed_text = re.sub(currency_pattern, r'<say-as interpret-as="currency">$\1</say-as>', processed_text)
     
     # Step 3: Handle dates (before numbers to avoid conflicts)
-    # Use more specific date patterns to ensure proper recognition
-    date_patterns = [
-        # MM/DD/YYYY format (covers both 2/24/2025 and 02/24/2025)
-        (r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', r'<say-as interpret-as="date" format="mdy">\1/\2/\3</say-as>'),
-        # MM-DD-YYYY format
-        (r'\b(\d{1,2})-(\d{1,2})-(\d{4})\b', r'<say-as interpret-as="date" format="mdy">\1-\2-\3</say-as>')
-    ]
+    # Convert dates to a more natural format for better pronunciation
+    def convert_date_to_natural(match):
+        month, day, year = match.groups()
+        
+        # Convert month number to month name
+        month_names = {
+            '1': 'January', '01': 'January',
+            '2': 'February', '02': 'February', 
+            '3': 'March', '03': 'March',
+            '4': 'April', '04': 'April',
+            '5': 'May', '05': 'May',
+            '6': 'June', '06': 'June',
+            '7': 'July', '07': 'July',
+            '8': 'August', '08': 'August',
+            '9': 'September', '09': 'September',
+            '10': 'October',
+            '11': 'November',
+            '12': 'December'
+        }
+        
+        month_name = month_names.get(month, month)
+        
+        # Convert day to ordinal (1st, 2nd, 3rd, 4th, etc.)
+        day_int = int(day)
+        if 10 <= day_int % 100 <= 20:
+            suffix = 'th'
+        else:
+            suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(day_int % 10, 'th')
+        
+        day_ordinal = f"{day_int}{suffix}"
+        
+        return f"{month_name} {day_ordinal}, {year}"
     
-    for pattern, replacement in date_patterns:
-        processed_text = re.sub(pattern, replacement, processed_text)
+    # Handle MM/DD/YYYY format
+    processed_text = re.sub(r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', convert_date_to_natural, processed_text)
+    # Handle MM-DD-YYYY format  
+    processed_text = re.sub(r'\b(\d{1,2})-(\d{1,2})-(\d{4})\b', convert_date_to_natural, processed_text)
     
     print(f"🔧 After date processing: {processed_text[:200]}...")
     
