@@ -472,7 +472,7 @@ def process_text_with_streaming_tts(text, voice_name="en-US-Wavenet-C"):
         traceback.print_exc()
         return None
 
-def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-A'):
+def process_text_with_tts_sync(text, language='en-US', voice='en-US-Wavenet-C'):
     """TTS processing using subprocess to isolate async LiveKit TTS (fixes event loop issue)"""
     try:
         print("🔧 process_text_with_tts_sync FUNCTION CALLED")
@@ -698,7 +698,7 @@ if __name__ == "__main__":
         traceback.print_exc()
         return None
 
-async def process_text_with_tts_async(text, language='en-US', voice='en-US-Wavenet-A'):  # pylint: disable=unused-argument
+async def process_text_with_tts_async(text, language='en-US', voice='en-US-Wavenet-C'):  # pylint: disable=unused-argument
     """Async TTS processing using LiveKit directly"""
     try:
         print(f"🔧 Async TTS processing for text: {text[:50]}...")
@@ -1521,7 +1521,7 @@ def test_streaming_tts():
     try:
         data = request.get_json()
         test_text = data.get('text', 'Hello, this is a test of the streaming text-to-speech system with Wavenet voice.')
-        voice_name = data.get('voice', 'en-US-Wavenet-C')
+        voice_name = data.get('voice', 'en-US-Wavenet-C')  # Default to female Wavenet voice
         
         print(f"🔧 Testing streaming TTS with text: {test_text}")
         print(f"🔧 Using voice: {voice_name}")
@@ -1808,7 +1808,7 @@ def text_to_speech():
 
         text = data.get('text', '') if data else ''
         language = data.get('language', 'en-US') if data else 'en-US'
-        voice = data.get('voice', 'en-US-Wavenet-A') if data else 'en-US-Wavenet-A'
+        voice = data.get('voice', 'en-US-Wavenet-C') if data else 'en-US-Wavenet-C'  # Default to female Wavenet voice
 
         logger.info(f"Extracted parameters:")
         logger.info(f"  Text: '{text}' (length: {len(text)})")
