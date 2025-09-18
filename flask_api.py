@@ -139,12 +139,23 @@ def convert_text_to_ssml(text):
     processed_text = re.sub(currency_pattern, r'<say-as interpret-as="currency">$\1</say-as>', processed_text)
     
     # Step 3: Handle dates (before numbers to avoid conflicts)
-    date_pattern = r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b'
-    processed_text = re.sub(date_pattern, r'<say-as interpret-as="date" format="mdy">\1/\2/\3</say-as>', processed_text)
+    # Use more specific date patterns to ensure proper recognition
+    date_patterns = [
+        # MM/DD/YYYY format (covers both 2/24/2025 and 02/24/2025)
+        (r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', r'<say-as interpret-as="date" format="mdy">\1/\2/\3</say-as>'),
+        # MM-DD-YYYY format
+        (r'\b(\d{1,2})-(\d{1,2})-(\d{4})\b', r'<say-as interpret-as="date" format="mdy">\1-\2-\3</say-as>')
+    ]
+    
+    for pattern, replacement in date_patterns:
+        processed_text = re.sub(pattern, replacement, processed_text)
+    
+    print(f"🔧 After date processing: {processed_text[:200]}...")
     
     # Step 4: Handle numbers - wrap with say-as for cardinal interpretation
     # This ensures "0" is pronounced as "zero" not "oh"
-    processed_text = re.sub(r'\b(\d+)\b', r'<say-as interpret-as="cardinal">\1</say-as>', processed_text)
+    # Only process numbers that are not part of dates or currency
+    processed_text = re.sub(r'(?<![/$-])\b(\d+)\b(?![/$-])', r'<say-as interpret-as="cardinal">\1</say-as>', processed_text)
     
     # Step 5: Wrap in speak tags
     processed_text = f"<speak>{processed_text.strip()}</speak>"
