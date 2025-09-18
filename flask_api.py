@@ -92,9 +92,8 @@ def create_tts_engine_with_voice(voice_name="en-US-Wavenet-C"):
             return tts_engine_cache[voice_name]
         
         # Create new TTS engine with voice configuration
-        # Note: LiveKit TTS doesn't support voice selection in the constructor
-        # Voice selection is handled by the Google Cloud TTS service internally
-        new_tts_engine = google.TTS()
+        # LiveKit TTS supports voice selection in the constructor
+        new_tts_engine = google.TTS(voice=voice_name)
         
         # Cache the engine
         tts_engine_cache[voice_name] = new_tts_engine
@@ -514,9 +513,9 @@ async def generate_tts():
    try:
        print("🔧 Starting TTS generation...")
        
-       # Initialize TTS engine
-       print("🔧 Initializing TTS engine...")
-       tts_engine = google.TTS()
+       # Initialize TTS engine with voice
+       print(f"🔧 Initializing TTS engine with voice: {voice}")
+       tts_engine = google.TTS(voice=voice)
        print("✅ TTS engine initialized")
        
        # Read text from file
@@ -1237,10 +1236,10 @@ def initialize_livekit_components():
             logger.error(f"STT Traceback: {traceback.format_exc()}")
             return False
         
-        # Initialize TTS engine
+        # Initialize TTS engine with default voice
         try:
-            logger.info("🔧 Initializing TTS engine...")
-            tts_engine = google.TTS()
+            logger.info("🔧 Initializing TTS engine with default voice...")
+            tts_engine = google.TTS(voice='en-US-Wavenet-C')
             logger.info("✅ TTS engine initialized successfully")
         except Exception as e:
             logger.error(f"❌ Failed to initialize TTS engine: {e}")
