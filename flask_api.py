@@ -91,9 +91,13 @@ def create_tts_engine_with_voice(voice_name="en-US-Wavenet-C"):
             print(f"✅ Using cached TTS engine for voice: {voice_name}")
             return tts_engine_cache[voice_name]
         
-        # Create new TTS engine with voice configuration
-        # LiveKit TTS supports voice selection in the constructor
-        new_tts_engine = google.TTS(voice=voice_name)
+        # Create new TTS engine
+        # Note: LiveKit TTS doesn't support voice in constructor
+        # We'll store the voice name with the engine for later use
+        new_tts_engine = google.TTS()
+        
+        # Store the voice name as an attribute for later reference
+        new_tts_engine.voice_name = voice_name
         
         # Cache the engine
         tts_engine_cache[voice_name] = new_tts_engine
@@ -282,69 +286,61 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
             # Generate audio for this chunk
             audio_stream = None
             try:
-                # Process plain text chunk
-                print(f"🔧 Processing plain text chunk: {chunk[:100]}...")
-                audio_stream = voice_tts_engine.synthesize(text=chunk)
+                # Process plain text chunk with voice selection
+                print(f"🔧 Processing plain text chunk with voice {voice_name}: {chunk[:100]}...")
+                
+                # Use Google Cloud TTS directly with voice parameters
+                from google.cloud import texttospeech
+                
+                # Create TTS client
+                tts_client = texttospeech.TextToSpeechClient()
+                
+                # Configure voice parameters
+                voice = texttospeech.VoiceSelectionParams(
+                    language_code='en-US',
+                    name=voice_name,
+                    ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+                )
+                
+                # Configure audio
+                audio_config = texttospeech.AudioConfig(
+                    audio_encoding=texttospeech.AudioEncoding.MP3
+                )
+                
+                # Synthesize speech
+                synthesis_input = texttospeech.SynthesisInput(text=chunk)
+                response = tts_client.synthesize_speech(
+                    input=synthesis_input,
+                    voice=voice,
+                    audio_config=audio_config
+                )
+                
+                # Convert to audio stream format
+                import io
+                audio_stream = io.BytesIO(response.audio_content)
                 chunk_audio_data = []
                 
-                # Process audio stream for this chunk with proper error handling
+                # Process audio data directly from Google Cloud TTS
                 try:
-                    # Use async iteration with timeout and proper cleanup
-                    def create_collect_chunk_audio(stream, data_list, chunk_index):
-                        async def collect_chunk_audio():
-                            try:
-                                async for audio_chunk in stream:
-                                    if hasattr(audio_chunk, 'frame') and audio_chunk.frame:
-                                        data_list.append(audio_chunk.frame.data)
-                                    elif hasattr(audio_chunk, 'data'):
-                                        data_list.append(audio_chunk.data)
-                            except AttributeError as attr_error:
-                                # Handle the specific gRPC InterceptedUnaryUnaryCall error
-                                if "_interceptors_task" in str(attr_error):
-                                    print(f"🔧 Handling gRPC cleanup error for chunk {chunk_index+1}: {attr_error}")
-                                    # This is a known gRPC cleanup issue, not critical
-                                else:
-                                    raise attr_error
-                            except Exception as e:
-                                print(f"🔧 Error in chunk {chunk_index+1} audio collection: {e}")
-                                raise e
-                        return collect_chunk_audio
+                    # Read audio data from the BytesIO stream
+                    audio_stream.seek(0)
+                    audio_data = audio_stream.read()
+                    chunk_audio_data.append(audio_data)
+                    print(f"✅ Generated audio for chunk {i+1}, size: {len(audio_data)} bytes")
                     
-                    collect_func = create_collect_chunk_audio(audio_stream, chunk_audio_data, i)
-                    
-                    # Run with timeout
-                    await asyncio.wait_for(collect_func(), timeout=10.0)
-                    
-                except asyncio.TimeoutError:
-                    print(f"❌ Chunk {i+1} async iteration timed out")
-                except AttributeError as attr_error:
-                    if "_interceptors_task" in str(attr_error):
-                        print(f"🔧 gRPC cleanup error for chunk {i+1} (non-critical): {attr_error}")
-                        # Continue processing as this is just a cleanup issue
-                    else:
-                        print(f"❌ Attribute error processing chunk {i+1}: {attr_error}")
-                        continue
-                except Exception as stream_error:
-                    print(f"❌ Error processing chunk {i+1} audio stream: {stream_error}")
+                except Exception as audio_error:
+                    print(f"❌ Error processing audio for chunk {i+1}: {audio_error}")
                     continue
-                finally:
-                    # Ensure proper cleanup of audio stream
-                    try:
-                        if audio_stream and hasattr(audio_stream, 'cancel'):
-                            audio_stream.cancel()
-                    except Exception as cleanup_error:
-                        print(f"🔧 Cleanup error for chunk {i+1} (non-critical): {cleanup_error}")
                 
+                # Add chunk audio data to the main collection
                 if chunk_audio_data:
-                    # Combine audio data for this chunk
-                    chunk_audio_bytes = b"".join(chunk_audio_data)
-                    all_audio_chunks.append(chunk_audio_bytes)
-                    print(f"✅ Chunk {i+1} processed: {len(chunk_audio_bytes)} bytes")
+                    all_audio_chunks.extend(chunk_audio_data)
+                    print(f"✅ Added chunk {i+1} audio data to collection")
                 else:
-                    print(f"❌ No audio data for chunk {i+1}")
+                    print(f"⚠️ No audio data generated for chunk {i+1}")
                     
             except Exception as chunk_error:
-                print(f"❌ Error creating audio stream for chunk {i+1}: {chunk_error}")
+                print(f"❌ Error processing chunk {i+1}: {chunk_error}")
                 continue
         
         if not all_audio_chunks:
@@ -513,9 +509,9 @@ async def generate_tts():
    try:
        print("🔧 Starting TTS generation...")
        
-       # Initialize TTS engine with voice
-       print(f"🔧 Initializing TTS engine with voice: {voice}")
-       tts_engine = google.TTS(voice=voice)
+       # Initialize TTS engine
+       print(f"🔧 Initializing TTS engine...")
+       tts_engine = google.TTS()
        print("✅ TTS engine initialized")
        
        # Read text from file
@@ -1236,10 +1232,10 @@ def initialize_livekit_components():
             logger.error(f"STT Traceback: {traceback.format_exc()}")
             return False
         
-        # Initialize TTS engine with default voice
+        # Initialize TTS engine
         try:
-            logger.info("🔧 Initializing TTS engine with default voice...")
-            tts_engine = google.TTS(voice='en-US-Wavenet-C')
+            logger.info("🔧 Initializing TTS engine...")
+            tts_engine = google.TTS()
             logger.info("✅ TTS engine initialized successfully")
         except Exception as e:
             logger.error(f"❌ Failed to initialize TTS engine: {e}")
