@@ -109,6 +109,44 @@ def create_tts_engine_with_voice(voice_name="en-US-Wavenet-C"):
         print(f"❌ Error creating TTS engine with voice {voice_name}: {e}")
         return None
 
+def convert_text_to_ssml(text):
+    """Convert text to SSML for Google Cloud TTS - only fix zero pronunciation"""
+    if not text:
+        return text
+    
+    import re
+    
+    # Check text length to prevent size limit errors
+    MAX_TTS_LENGTH = 4000  # Maximum characters for TTS
+    if len(text) > MAX_TTS_LENGTH:
+        print(f"⚠️ Text too long for TTS ({len(text)} chars), truncating to {MAX_TTS_LENGTH} chars")
+        text = text[:MAX_TTS_LENGTH] + "..."
+        print(f"🔧 Truncated text: {text[:100]}...")
+    
+    print(f"🔧 Converting text to SSML (zero fix only): {text[:100]}...")
+    
+    # Start with the original text
+    processed_text = text.strip()
+    
+    # Step 1: Fix "oh" -> "zero" pronunciation issue (most important)
+    processed_text = re.sub(r'\boh\b', 'zero', processed_text, flags=re.IGNORECASE)
+    processed_text = re.sub(r'\boh oh\b', 'zero zero', processed_text, flags=re.IGNORECASE)
+    processed_text = re.sub(r'\boh oh oh\b', 'zero zero zero', processed_text, flags=re.IGNORECASE)
+    processed_text = re.sub(r'\boh oh oh oh\b', 'zero zero zero zero', processed_text, flags=re.IGNORECASE)
+    
+    # Step 2: Handle numbers - wrap with say-as for cardinal interpretation
+    # This ensures "0" is pronounced as "zero" not "oh"
+    processed_text = re.sub(r'\b(\d+)\b', r'<say-as interpret-as="cardinal">\1</say-as>', processed_text)
+    
+    # Step 3: Wrap in speak tags
+    processed_text = f"<speak>{processed_text.strip()}</speak>"
+    
+    # Step 4: Clean up multiple spaces
+    processed_text = re.sub(r'\s+', ' ', processed_text)
+    
+    print(f"🔧 Final SSML (zero fix): {processed_text[:200]}...")
+    return processed_text
+
 def preprocess_text_for_tts(text):
     """Preprocess text to make TTS sound more natural and human-like using SSML"""
     if not text:
@@ -307,8 +345,12 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
                     audio_encoding=texttospeech.AudioEncoding.MP3
                 )
                 
-                # Synthesize speech
-                synthesis_input = texttospeech.SynthesisInput(text=chunk)
+                # Preprocess text to SSML for better pronunciation
+                ssml_text = convert_text_to_ssml(chunk)
+                print(f"🔧 SSML text: {ssml_text[:200]}...")
+                
+                # Synthesize speech with SSML
+                synthesis_input = texttospeech.SynthesisInput(ssml=ssml_text)
                 response = tts_client.synthesize_speech(
                     input=synthesis_input,
                     voice=voice,
