@@ -18,9 +18,28 @@ except ImportError:
 from livekit.plugins import google
 from livekit.agents import Agent, AgentSession
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure comprehensive logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('flask_api_debug.log')
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Add startup logging
+logger.info("=" * 60)
+logger.info("🚀 FLASK API STARTING UP")
+logger.info("=" * 60)
+logger.info(f"Python version: {sys.version}")
+logger.info(f"Working directory: {os.getcwd()}")
+logger.info(f"Environment variables:")
+for key in ['GOOGLE_APPLICATION_CREDENTIALS', 'LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET']:
+    value = os.environ.get(key, 'NOT SET')
+    logger.info(f"  {key}: {'SET' if value != 'NOT SET' else 'NOT SET'}")
+logger.info("=" * 60)
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -1151,31 +1170,45 @@ def initialize_livekit_components():
     global stt_engine, tts_engine, vad_engine, agent_session, agent
     
     try:
-        print("🔧 Initializing LiveKit components...")
-        print(f"🔧 TTS engine available: {tts_engine is not None}")
-        print(f"🔧 Agent session available: {agent_session is not None}")
+        logger.info("=" * 50)
+        logger.info("🔧 INITIALIZING LIVEKIT COMPONENTS")
+        logger.info("=" * 50)
+        logger.info(f"Current component status:")
+        logger.info(f"  TTS engine: {'Available' if tts_engine is not None else 'Not initialized'}")
+        logger.info(f"  STT engine: {'Available' if stt_engine is not None else 'Not initialized'}")
+        logger.info(f"  VAD engine: {'Available' if vad_engine is not None else 'Not initialized'}")
+        logger.info(f"  Agent session: {'Available' if agent_session is not None else 'Not initialized'}")
+        logger.info(f"  Agent: {'Available' if agent is not None else 'Not initialized'}")
         
         # Setup Google credentials
+        logger.info("🔧 Setting up Google credentials...")
         if not setup_google_credentials():
-            print("❌ Failed to setup Google credentials")
+            logger.error("❌ Failed to setup Google credentials")
             return False
+        logger.info("✅ Google credentials setup successful")
         
         # Initialize STT engine
         try:
-            print("🔧 Initializing STT engine...")
+            logger.info("🔧 Initializing STT engine...")
             stt_engine = google.STT()
-            print("✅ STT engine initialized successfully")
+            logger.info("✅ STT engine initialized successfully")
         except Exception as e:
-            print(f"❌ Failed to initialize STT engine: {e}")
+            logger.error(f"❌ Failed to initialize STT engine: {e}")
+            logger.error(f"STT Error details: {str(e)}")
+            import traceback
+            logger.error(f"STT Traceback: {traceback.format_exc()}")
             return False
         
         # Initialize TTS engine
         try:
-            print("🔧 Initializing TTS engine...")
+            logger.info("🔧 Initializing TTS engine...")
             tts_engine = google.TTS()
-            print("✅ TTS engine initialized successfully")
+            logger.info("✅ TTS engine initialized successfully")
         except Exception as e:
-            print(f"❌ Failed to initialize TTS engine: {e}")
+            logger.error(f"❌ Failed to initialize TTS engine: {e}")
+            logger.error(f"TTS Error details: {str(e)}")
+            import traceback
+            logger.error(f"TTS Traceback: {traceback.format_exc()}")
             return False
         
         # VAD (Voice Activity Detection) is not available in current LiveKit version
@@ -1221,68 +1254,65 @@ print("🔧 Starting Flask API initialization...")
 initialize_livekit_components()
 
 @app.route('/', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
+def root():
+    """Root endpoint - redirect to health check"""
     return jsonify({
-        "status": "healthy",
         "message": "LiveKit Voice Agent API is running",
-        "components": {
-            "stt_engine": "Browser-based (LWC)",
-            "tts_engine": tts_engine is not None,
-            "agent_session": agent_session is not None,
-            "agent": agent is not None,
-            "streaming_tts": True,
-            "wavenet_voices": ["en-US-Wavenet-A", "en-US-Wavenet-B", "en-US-Wavenet-C", "en-US-Wavenet-D", "en-US-Wavenet-E", "en-US-Wavenet-F"]
-        },
-        "salesforce_config": {
-            "org_domain": "SET" if SALESFORCE_ORG_DOMAIN else "NOT SET",
-            "client_id": "SET" if SALESFORCE_CLIENT_ID else "NOT SET",
-            "client_secret": "SET" if SALESFORCE_CLIENT_SECRET else "NOT SET",
-            "agent_id": SALESFORCE_AGENT_ID or "NOT SET"
-        },
-        "cache_status": {
-            "has_access_token": "access_token" in salesforce_token_cache,
-            "token_expires_at": salesforce_token_cache.get('expires_at', 'N/A'),
-            "cached_sessions": list(salesforce_session_cache.keys()),
-            "salesforce_sessions": [k for k in salesforce_session_cache.keys() if k.endswith('_salesforce_session')]
-        },
-        "streaming_performance": {
-            "total_calls": _streaming_performance["total_calls"],
-            "first_call_time": _streaming_performance["first_call_time"],
-            "subsequent_calls_count": len(_streaming_performance["subsequent_call_times"]),
-            "average_subsequent_time": sum(_streaming_performance["subsequent_call_times"]) / len(_streaming_performance["subsequent_call_times"]) if _streaming_performance["subsequent_call_times"] else None
-        }
+        "health_check": "/health",
+        "endpoints": [
+            "GET /health",
+            "POST /api/einstein/agent", 
+            "POST /api/voice/tts",
+            "POST /api/voice/tts-stream",
+            "POST /api/voice/stt"
+        ]
     })
 
 @app.route('/api/einstein/agent', methods=['POST'])
 def einstein_agent():
     """Salesforce Einstein Agent endpoint"""
     try:
-        print("=== EINSTEIN AGENT API CALLED ===")
+        logger.info("=" * 50)
+        logger.info("🤖 EINSTEIN AGENT API ENDPOINT CALLED")
+        logger.info("=" * 50)
+        
+        # Log request details
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        logger.info(f"Request content type: {request.content_type}")
+        logger.info(f"Request remote address: {request.remote_addr}")
+        
         data = request.get_json()
-        print("Einstein request data:", json.dumps(data, indent=2))
+        logger.info(f"Request JSON data: {json.dumps(data, indent=2) if data else 'None'}")
         
-        message = data.get('message', '')
-        provided_session_id = data.get('session_id', '')
-        agent_id = data.get('agent_id', SALESFORCE_AGENT_ID or 'agent_001')
+        message = data.get('message', '') if data else ''
+        provided_session_id = data.get('session_id', '') if data else ''
+        agent_id = data.get('agent_id', SALESFORCE_AGENT_ID or 'agent_001') if data else (SALESFORCE_AGENT_ID or 'agent_001')
         
-        print(f"Message: {message}")
-        print(f"Provided Session ID: {provided_session_id}")
-        print(f"Agent ID: {agent_id}")
+        logger.info(f"Extracted parameters:")
+        logger.info(f"  Message: '{message}' (length: {len(message)})")
+        logger.info(f"  Provided Session ID: '{provided_session_id}'")
+        logger.info(f"  Agent ID: '{agent_id}'")
         
         if not message:
+            logger.error("❌ Error: Message is required")
             return jsonify({"error": "Message is required"}), 400
         
         # Use provided session_id or get/create a persistent one
         if provided_session_id:
             session_id = provided_session_id
-            print(f"✅ Using provided session ID: {session_id}")
+            logger.info(f"✅ Using provided session ID: {session_id}")
         else:
+            logger.info("🔧 No session ID provided, getting/creating persistent one...")
             session_id = get_or_create_session_id(agent_id)
-            print(f"✅ Using persistent session ID: {session_id}")
+            logger.info(f"✅ Using persistent session ID: {session_id}")
         
         # Call actual Salesforce Einstein Agent API
-        print("🔧 Calling Salesforce Einstein Agent API...")
+        logger.info("🔧 Calling Salesforce Einstein Agent API...")
+        logger.info(f"  Message: '{message}'")
+        logger.info(f"  Session ID: '{session_id}'")
+        logger.info(f"  Agent ID: '{agent_id}'")
+        
         einstein_response = call_salesforce_einstein_agent(message, session_id, agent_id)
         
         if einstein_response:
@@ -1584,6 +1614,55 @@ def speech_to_text():
         print(f"❌ Error in STT endpoint: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint to diagnose 503 issues"""
+    try:
+        logger.info("🏥 HEALTH CHECK ENDPOINT CALLED")
+        
+        health_status = {
+            "status": "healthy",
+            "timestamp": time.time(),
+            "components": {
+                "tts_engine": tts_engine is not None,
+                "stt_engine": stt_engine is not None,
+                "vad_engine": vad_engine is not None,
+                "agent_session": agent_session is not None,
+                "agent": agent is not None
+            },
+            "environment": {
+                "google_credentials_set": os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') is not None,
+                "livekit_url_set": os.environ.get('LIVEKIT_URL') is not None,
+                "livekit_api_key_set": os.environ.get('LIVEKIT_API_KEY') is not None,
+                "livekit_api_secret_set": os.environ.get('LIVEKIT_API_SECRET') is not None
+            },
+            "python_version": sys.version,
+            "working_directory": os.getcwd()
+        }
+        
+        # Check if any critical components are missing
+        critical_components = ['tts_engine', 'stt_engine']
+        missing_components = [comp for comp in critical_components if not health_status['components'][comp]]
+        
+        if missing_components:
+            health_status['status'] = 'degraded'
+            health_status['missing_components'] = missing_components
+            logger.warning(f"⚠️ Health check: Missing components: {missing_components}")
+        else:
+            logger.info("✅ Health check: All critical components available")
+        
+        return jsonify(health_status)
+        
+    except Exception as e:
+        logger.error(f"❌ Health check failed: {e}")
+        import traceback
+        logger.error(f"Health check traceback: {traceback.format_exc()}")
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
+
 @app.route('/api/voice/tts-stream', methods=['POST'])
 def text_to_speech_streaming():
     """Streaming Text-to-Speech endpoint with Wavenet voice"""
@@ -1676,36 +1755,53 @@ def text_to_speech_streaming():
 def text_to_speech():
     """Text-to-Speech endpoint"""
     try:
-        print("=== TTS API CALLED ===")
+        logger.info("=" * 50)
+        logger.info("🎙️ TTS API ENDPOINT CALLED")
+        logger.info("=" * 50)
+        
+        # Log request details
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        logger.info(f"Request content type: {request.content_type}")
+        logger.info(f"Request remote address: {request.remote_addr}")
+        
         data = request.get_json()
-        print("TTS request data:", json.dumps(data, indent=2))
+        logger.info(f"Request JSON data: {json.dumps(data, indent=2) if data else 'None'}")
 
-        text = data.get('text', '')
-        language = data.get('language', 'en-US')
-        voice = data.get('voice', 'en-US-Wavenet-A')
+        text = data.get('text', '') if data else ''
+        language = data.get('language', 'en-US') if data else 'en-US'
+        voice = data.get('voice', 'en-US-Wavenet-A') if data else 'en-US-Wavenet-A'
 
-        print(f"Text: {text}")
-        print(f"Language: {language}")
-        print(f"Voice: {voice}")
+        logger.info(f"Extracted parameters:")
+        logger.info(f"  Text: '{text}' (length: {len(text)})")
+        logger.info(f"  Language: {language}")
+        logger.info(f"  Voice: {voice}")
 
         if not text:
-            print("❌ Error: Text is required")
+            logger.error("❌ Error: Text is required")
             return jsonify({"error": "Text is required"}), 400
 
+        # Check LiveKit components status
+        logger.info(f"TTS engine status: {'Available' if tts_engine else 'Not initialized'}")
+        
         # Initialize LiveKit components if not already done
         if not tts_engine:
-            print("🔧 Initializing LiveKit components for TTS...")
+            logger.info("🔧 Initializing LiveKit components for TTS...")
             result = initialize_livekit_components()
             if not result:
-                print("❌ Failed to initialize LiveKit components")
+                logger.error("❌ Failed to initialize LiveKit components")
                 return jsonify({"error": "Failed to initialize LiveKit components"}), 500
+            logger.info("✅ LiveKit components initialized successfully")
 
-        print("✅ TTS engine available, processing...")
+        logger.info("✅ TTS engine available, processing...")
 
         # Process text with TTS using LiveKit directly (matching working code)
-        print(f"🔧 Original text for TTS: '{text}'")
-        print(f"🔧 Text length: {len(text)} characters")
-        print(f"🔧 Text type: {type(text)}")
+        logger.info(f"🔧 Processing text for TTS:")
+        logger.info(f"  Original text: '{text}'")
+        logger.info(f"  Text length: {len(text)} characters")
+        logger.info(f"  Text type: {type(text)}")
+        logger.info(f"  Language: {language}")
+        logger.info(f"  Voice: {voice}")
         
         audio_content = process_text_with_tts_sync(text, language, voice)
 
@@ -1745,6 +1841,31 @@ def text_to_speech():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    print("🔧 Starting Flask API server...")
-    print("🔧 Flask API will run on port 10000")
+    logger.info("=" * 60)
+    logger.info("🚀 STARTING FLASK API SERVER")
+    logger.info("=" * 60)
+    logger.info("🔧 Flask API will run on port 10000")
+    logger.info("🔧 Debug logging enabled")
+    logger.info("🔧 Health check available at: http://localhost:10000/health")
+    logger.info("🔧 Main endpoints:")
+    logger.info("  - POST /api/einstein/agent")
+    logger.info("  - POST /api/voice/tts")
+    logger.info("  - POST /api/voice/tts-stream")
+    logger.info("  - POST /api/voice/stt")
+    logger.info("  - GET /health")
+    logger.info("=" * 60)
+    
+    # Try to initialize components on startup
+    logger.info("🔧 Attempting to initialize LiveKit components on startup...")
+    try:
+        init_result = initialize_livekit_components()
+        if init_result:
+            logger.info("✅ LiveKit components initialized successfully on startup")
+        else:
+            logger.warning("⚠️ LiveKit components initialization failed on startup - will retry on first request")
+    except Exception as e:
+        logger.warning(f"⚠️ LiveKit components initialization failed on startup: {e}")
+        logger.warning("Components will be initialized on first request")
+    
+    logger.info("🚀 Starting Flask server...")
     app.run(host='0.0.0.0', port=10000, debug=False)
