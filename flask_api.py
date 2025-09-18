@@ -252,9 +252,9 @@ async def generate_streaming_tts_async(text, voice_name="en-US-Wavenet-C"):
             text = text[:MAX_TTS_LENGTH] + "..."
             print(f"🔧 Truncated text: {text[:100]}...")
         
-       # Preprocess text to improve TTS pronunciation
-       processed_text = preprocess_text_for_tts(text)
-       print(f"🔧 Preprocessed text: {processed_text[:200]}...")
+        # Preprocess text to improve TTS pronunciation
+        processed_text = preprocess_text_for_tts(text)
+        print(f"🔧 Preprocessed text: {processed_text[:200]}...")
         
         # Create TTS engine with specific voice
         voice_tts_engine = create_tts_engine_with_voice(voice_name)
